@@ -1,107 +1,110 @@
 const UserModel = require("../model/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { redisClient } = require("../config/redis");
 
-/**
- * @name RegisterUserController
- * @route POST /api/auth/register
- * @description Register a new user, expects username, email, password in the request body
- * @access Public
- */
+// Register
 async function RegisterUserController(req, res) {
-  const { username, email, password } = req.body;
+  try {
+    const { username, email, password } = req.body;
 
-  // Check required fields
-  if (!username || !email || !password) {
-    return res.status(400).json({
-      message: "Please provide username, email and password",
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        message: "Please provide username, email and password",
+      });
+    }
+
+    const isUserAlreadyExists = await UserModel.findOne({
+      $or: [{ username }, { email }],
+    });
+
+    if (isUserAlreadyExists) {
+      return res.status(400).json({
+        message: "User already exists",
+      });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+
+    const user = await UserModel.create({
+      username,
+      email,
+      password: hash,
+    });
+
+    const token = jwt.sign(
+      {
+        id: user._id,
+        username: user.username,
+      },
+      process.env.JWT_SECRET_KEY,
+      {
+        expiresIn: "1d",
+      },
+    );
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+    });
+
+    return res.status(201).json({
+      message: "User registered successfully",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Internal server error",
     });
   }
-
-  // Check if user already exists
-  const isUserAlreadyExists = await UserModel.findOne({
-    $or: [{ username }, { email }],
-  });
-
-  if (isUserAlreadyExists) {
-    return res.status(400).json({
-      message: "User already exists",
-    });
-  }
-
-  // Hash password
-  const hash = await bcrypt.hash(password, 10);
-
-  // Create user
-  const user = await UserModel.create({
-    username,
-    email,
-    password: hash,
-  });
-
-  const token = jwt.sign(
-    {
-      id: user._Id,
-      username: user.username,
-    },
-    process.env.JWT_SECRET_KEY,
-    {
-      expiresIn: "1d",
-    },
-  );
-
-  req.cookie("token", token)
-
-  res.status(201).json({
-    message:"User registered successfully",
-   user: {
-    id: user._id,
-    username: user.username,
-    email: user.email
-   }
-  })
 }
 
-/**
- * @name LoginUserController
- * @route GET /api/auth/login
- * @description Login the user, expects email, password in the request body
- * @access Public
- */
-async function LoginUserController(req,res) {
+// Login
+async function LoginUserController(req, res) {
+  try {
+    const { email, password } = req.body;
 
-  const{email , password} = req.body
+    const user = await UserModel.findOne({ email });
 
-  const user = await UserModel.findOne({email})
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid email or password",
+      });
+    }
 
-  if (!user) {
-    return res.status(400).json({
-      message:"Invalid email or password"
-    })
-  }
+    const isPasswordValid = await bcrypt.compare(password, user.password);
 
-  const isPasswordValid = bcrypt.compare(password, user.password)
+    if (!isPasswordValid) {
+      return res.status(400).json({
+        message: "Invalid email or password",
+      });
+    }
 
-  if (!isPasswordValid) {
-    return res.status(400).json({
-      message:"Invalid Password"
-    })
-  }
+    const token = jwt.sign(
+      {
+        id: user._id,
+        username: user.username,
+      },
+      process.env.JWT_SECRET_KEY,
+      {
+        expiresIn: "1d",
+      },
+    );
 
-  const token = jwt.sign(
-    {
-      id: user._Id,
-      username: user.username,
-    },
-    process.env.JWT_SECRET_KEY,
-    {
-      expiresIn: "1d",
-    },
-  );
-  
-  req.cookie("token", token);
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+    });
 
-    res.status(201).json({
+    return res.status(200).json({
       message: "User LoggedIN successfully",
       user: {
         id: user._id,
@@ -109,8 +112,52 @@ async function LoginUserController(req,res) {
         email: user.email,
       },
     });
+  } catch (error) {
+    console.error(error);
 
-   
-  
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
 }
-module.exports = { RegisterUserController, LoginUserController };
+
+// Logout
+async function LogoutUserController(req, res) {
+  try {
+    const token = req.cookies.token;
+
+    if (!token) {
+      return res.status(200).json({
+        message: "User already logged out",
+      });
+    }
+
+    // Add token to Redis blacklist
+    await redisClient.set(`blacklist:${token}`, "true", {
+      EX: 24 * 60 * 60,
+    });
+
+    // Remove token from browser
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+    });
+
+    return res.status(200).json({
+      message: "User logged out successfully",
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+}
+
+module.exports = {
+  RegisterUserController,
+  LoginUserController,
+  LogoutUserController,
+};
