@@ -1,6 +1,6 @@
-const app = require("./src/app");
-const connectTodb = require("./src/config/database");
-const { connectRedis } = require("./src/config/redis");
+const app = require("../src/app");
+const connectTodb = require("../src/config/database");
+const { connectRedis } = require("../src/config/redis");
 require("dotenv").config();
 const port = process.env.PORT;
 async function startServer() {
