@@ -3,7 +3,17 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { redisClient } = require("../config/redis");
 
-// Register
+/**
+ * @name RegisterUserController
+ * @route POST /api/auth/register
+ * @description Registers a new user, hashes the password, generates a JWT,
+ *              and stores the JWT in an HTTP-only cookie.
+ * @access Public
+ *
+ * @param {import("express").Request} req - Express request object
+ * @param {import("express").Response} res - Express response object
+ * @returns {Promise<import("express").Response>} HTTP response
+ */
 async function RegisterUserController(req, res) {
   try {
     const { username, email, password } = req.body;
@@ -66,27 +76,41 @@ async function RegisterUserController(req, res) {
   }
 }
 
-// Login
+/**
+ * @name LoginUserController
+ * @route POST /api/auth/login
+ * @description Authenticates a user using email and password.
+ *              Returns specific errors for an invalid email or password,
+ *              generates a JWT, and stores it in an HTTP-only cookie.
+ * @access Public
+ *
+ * @param {import("express").Request} req - Express request object
+ * @param {import("express").Response} res - Express response object
+ * @returns {Promise<import("express").Response>} HTTP response
+ */
 async function LoginUserController(req, res) {
   try {
     const { email, password } = req.body;
 
+    // Check email
     const user = await UserModel.findOne({ email });
 
     if (!user) {
       return res.status(400).json({
-        message: "Invalid email or password",
+        message: "Email is wrong",
       });
     }
 
+    // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
       return res.status(400).json({
-        message: "Invalid email or password",
+        message: "Password is wrong",
       });
     }
 
+    // Generate JWT
     const token = jwt.sign(
       {
         id: user._id,
@@ -98,6 +122,7 @@ async function LoginUserController(req, res) {
       },
     );
 
+    // Store JWT in HTTP-only cookie
     res.cookie("token", token, {
       httpOnly: true,
       secure: false,
@@ -121,7 +146,17 @@ async function LoginUserController(req, res) {
   }
 }
 
-// Logout
+/**
+ * @name LogoutUserController
+ * @route POST /api/auth/logout
+ * @description Logs out the current user by adding the JWT to the Redis
+ *              blacklist and clearing the authentication cookie.
+ * @access Private
+ *
+ * @param {import("express").Request} req - Express request object
+ * @param {import("express").Response} res - Express response object
+ * @returns {Promise<import("express").Response>} HTTP response
+ */
 async function LogoutUserController(req, res) {
   try {
     const token = req.cookies.token;
@@ -156,8 +191,46 @@ async function LogoutUserController(req, res) {
   }
 }
 
+/**
+ * @name GetMeUserController
+ * @route GET /api/auth/getme
+ * @description Returns the currently authenticated user's information
+ *              using the user ID stored in the verified JWT.
+ * @access Private
+ *
+ * @param {import("express").Request} req - Express request object
+ * @param {import("express").Response} res - Express response object
+ * @returns {Promise<import("express").Response>} HTTP response
+ */
+async function GetMeUserController(req, res) {
+  try {
+    const user = await UserModel.findById(req.user.id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "User fetched successfully",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+}
 module.exports = {
   RegisterUserController,
   LoginUserController,
   LogoutUserController,
+  GetMeUserController
 };
