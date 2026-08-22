@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../../context/theme.context";
+
 import {
   FiArrowLeft,
   FiArrowRight,
@@ -13,14 +14,16 @@ import {
   FiAlertCircle,
   FiHome,
 } from "react-icons/fi";
+
 import { forgotPassword } from "../../../api/auth.api";
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
   const { darkMode, toggleTheme } = useTheme();
 
-  const [identifier, setIdentifier] = useState("");
+  const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -29,7 +32,7 @@ const ForgotPassword = () => {
   // =====================================================
 
   const handleChange = (e) => {
-    setIdentifier(e.target.value);
+    setUsername(e.target.value);
 
     if (error) {
       setError("");
@@ -50,8 +53,10 @@ const ForgotPassword = () => {
     setError("");
     setSuccess("");
 
-    if (!identifier.trim()) {
-      setError("Username or email is required.");
+    const trimmedUsername = username.trim();
+
+    if (!trimmedUsername) {
+      setError("Username is required.");
       return;
     }
 
@@ -59,15 +64,30 @@ const ForgotPassword = () => {
       setLoading(true);
 
       const data = await forgotPassword({
-        identifier: identifier.trim(),
+        username: trimmedUsername,
       });
 
       console.log("Forgot password response:", data);
 
       setSuccess(
         data?.message ||
-          "If an account exists, password reset instructions have been sent.",
+          "If the account exists, an OTP has been sent to your registered email.",
       );
+
+      /*
+       * You can navigate to your OTP page here.
+       *
+       * Example:
+       *
+       * navigate("/verify-password-otp", {
+       *   state: {
+       *     username: trimmedUsername,
+       *   },
+       * });
+       *
+       * I am leaving it commented so you can first test
+       * the API response.
+       */
     } catch (err) {
       console.error("Forgot password error:", err);
 
@@ -148,9 +168,7 @@ const ForgotPassword = () => {
           darkMode ? "border-purple-500/10" : "border-purple-900/10"
         }`}
       >
-        {/* =====================================================
-            LOGO / HOME
-        ===================================================== */}
+        {/* LOGO */}
 
         <button
           type="button"
@@ -159,8 +177,6 @@ const ForgotPassword = () => {
           aria-label="Go to home"
           className="group flex items-center gap-3 text-left"
         >
-          {/* ICON */}
-
           <div
             className="
               flex h-9 w-9 items-center justify-center
@@ -175,8 +191,6 @@ const ForgotPassword = () => {
           >
             <FiCpu size={17} />
           </div>
-
-          {/* SITE NAME */}
 
           <div>
             <p
@@ -200,12 +214,10 @@ const ForgotPassword = () => {
           </div>
         </button>
 
-        {/* =====================================================
-            RIGHT HEADER ACTIONS
-        ===================================================== */}
+        {/* HEADER ACTIONS */}
 
         <div className="flex items-center gap-2">
-          {/* HOME BUTTON */}
+          {/* HOME */}
 
           <button
             type="button"
@@ -219,10 +231,11 @@ const ForgotPassword = () => {
             }`}
           >
             <FiHome size={14} />
+
             <span className="hidden sm:inline">Home</span>
           </button>
 
-          {/* THEME BUTTON */}
+          {/* THEME */}
 
           <button
             type="button"
@@ -246,9 +259,7 @@ const ForgotPassword = () => {
 
       <div className="relative z-10 flex min-h-[calc(100vh-4rem)] items-center justify-center px-6 py-8">
         <div className="w-full max-w-[430px]">
-          {/* =====================================================
-              CARD
-          ===================================================== */}
+          {/* CARD */}
 
           <div
             className={`border-2 transition-colors duration-500 ${
@@ -257,9 +268,7 @@ const ForgotPassword = () => {
                 : "border-black/15 bg-[#f8f5ec] shadow-[6px_6px_0px_#6d28d9]"
             }`}
           >
-            {/* =====================================================
-                CARD HEADER
-            ===================================================== */}
+            {/* CARD HEADER */}
 
             <div
               className={`flex items-center justify-between border-b-2 px-5 py-2.5 ${
@@ -281,14 +290,10 @@ const ForgotPassword = () => {
               </span>
             </div>
 
-            {/* =====================================================
-                BODY
-            ===================================================== */}
+            {/* BODY */}
 
             <div className="p-5 sm:p-6">
-              {/* =====================================================
-                  BACK TO LOGIN
-              ===================================================== */}
+              {/* BACK TO LOGIN */}
 
               <button
                 type="button"
@@ -306,9 +311,7 @@ const ForgotPassword = () => {
                 Back to login
               </button>
 
-              {/* =====================================================
-                  HEADING
-              ===================================================== */}
+              {/* HEADING */}
 
               <div className="mb-5">
                 <div className="mb-3 flex items-center gap-3">
@@ -347,14 +350,12 @@ const ForgotPassword = () => {
                     darkMode ? "text-white/35" : "text-black/45"
                   }`}
                 >
-                  Enter your username or email address and we'll help you
-                  recover your account.
+                  Enter your username and we'll send a secure OTP to your
+                  registered email address.
                 </p>
               </div>
 
-              {/* =====================================================
-                  ERROR
-              ===================================================== */}
+              {/* ERROR */}
 
               {error && (
                 <div
@@ -365,13 +366,12 @@ const ForgotPassword = () => {
                   }`}
                 >
                   <FiAlertCircle size={14} />
+
                   <span>{error}</span>
                 </div>
               )}
 
-              {/* =====================================================
-                  SUCCESS
-              ===================================================== */}
+              {/* SUCCESS */}
 
               {success && (
                 <div
@@ -382,20 +382,19 @@ const ForgotPassword = () => {
                   }`}
                 >
                   <FiCheck size={14} />
+
                   <span>{success}</span>
                 </div>
               )}
 
-              {/* =====================================================
-                  FORM
-              ===================================================== */}
+              {/* FORM */}
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {/* USERNAME / EMAIL */}
+                {/* USERNAME */}
 
                 <div>
                   <label className="mb-1.5 block font-mono text-[8px] font-bold uppercase tracking-widest opacity-60">
-                    Username or Email
+                    Username
                   </label>
 
                   <div
@@ -410,11 +409,11 @@ const ForgotPassword = () => {
                     </div>
 
                     <input
-                      name="identifier"
-                      value={identifier}
+                      name="username"
+                      value={username}
                       onChange={handleChange}
                       type="text"
-                      placeholder="username or email"
+                      placeholder="enter your username"
                       autoComplete="username"
                       disabled={loading}
                       required
@@ -458,7 +457,7 @@ const ForgotPassword = () => {
                     </>
                   ) : (
                     <>
-                      Recover Account
+                      Send OTP
                       <FiArrowRight
                         size={15}
                         className="transition-transform group-hover:translate-x-1"
@@ -468,9 +467,7 @@ const ForgotPassword = () => {
                 </button>
               </form>
 
-              {/* =====================================================
-                  LOGIN FOOTER
-              ===================================================== */}
+              {/* LOGIN FOOTER */}
 
               <div
                 className={`mt-5 border-t-2 pt-4 text-center ${
@@ -507,9 +504,7 @@ const ForgotPassword = () => {
                 </button>
               </div>
 
-              {/* =====================================================
-                  FOOTER
-              ===================================================== */}
+              {/* FOOTER */}
 
               <div
                 className={`mt-4 border-t pt-2 text-center font-mono text-[7px] uppercase tracking-widest ${

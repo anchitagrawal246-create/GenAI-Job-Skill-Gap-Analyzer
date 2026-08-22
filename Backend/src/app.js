@@ -5,11 +5,18 @@ const cors = require("cors");
 const app = express();
 
 app.use(express.json());
-app.use(cookieParser());
-
+app.use(express.urlencoded({ extended: true }));
 /* require all the routes here */
+app.post("/test-body", (req, res) => {
+  console.log("TEST BODY:", req.body);
+  
+  return res.status(200).json({
+    received: req.body,
+  });
+});
 const authRouter = require("./routes/auth.routes");
 
+app.use(cookieParser());
 
 app.use(
   cors({

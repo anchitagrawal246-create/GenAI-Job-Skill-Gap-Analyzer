@@ -1,34 +1,60 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FcGoogle } from "react-icons/fc";
 import { useTheme } from "../../../context/theme.context";
+import OTPModal from "../components/OTPModal";
+
 import {
   FiArrowRight,
   FiCheck,
   FiCpu,
   FiEye,
   FiEyeOff,
+  FiHome,
   FiLock,
   FiMail,
   FiMoon,
-  FiSun,
   FiShield,
+  FiSun,
   FiUser,
-  FiZap,
   FiX,
-  FiHome,
+  FiZap,
 } from "react-icons/fi";
+
+// =====================================================
+// API
+// =====================================================
 
 const API_URL = "http://localhost:3000/api/auth";
 
+// =====================================================
+// REGISTER COMPONENT
+// =====================================================
+
 const Register = () => {
   const navigate = useNavigate();
-
   const { darkMode, toggleTheme } = useTheme();
+
+  // =====================================================
+  // OTP
+  // =====================================================
+
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
+
+  // =====================================================
+  // PASSWORD
+  // =====================================================
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // =====================================================
+  // FORM
+  // =====================================================
 
   const [form, setForm] = useState({
     username: "",
@@ -38,6 +64,17 @@ const Register = () => {
   });
 
   const [emailTouched, setEmailTouched] = useState(false);
+
+  // =====================================================
+  // USERNAME
+  // =====================================================
+
+  const [usernameStatus, setUsernameStatus] = useState("idle");
+  const [usernameMessage, setUsernameMessage] = useState("");
+
+  // =====================================================
+  // GENERAL
+  // =====================================================
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -51,10 +88,83 @@ const Register = () => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
   };
 
-  const emailIsValid = form.email.length > 0 && isValidEmail(form.email.trim());
+  const emailIsValid =
+    form.email.length > 0 &&
+    isValidEmail(form.email.trim());
 
   const emailIsInvalid =
-    emailTouched && form.email.length > 0 && !isValidEmail(form.email.trim());
+    emailTouched &&
+    form.email.length > 0 &&
+    !isValidEmail(form.email.trim());
+
+  // =====================================================
+  // USERNAME REALTIME AVAILABILITY
+  // =====================================================
+
+  useEffect(() => {
+    const username = form.username.trim();
+
+    if (!username) {
+      setUsernameStatus("idle");
+      setUsernameMessage("");
+      return;
+    }
+
+    if (username.length < 3) {
+      setUsernameStatus("idle");
+      setUsernameMessage(
+        "USERNAME MUST BE AT LEAST 3 CHARACTERS"
+      );
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      setUsernameStatus("unavailable");
+      setUsernameMessage(
+        "USERNAME CAN ONLY CONTAIN LETTERS, NUMBERS AND UNDERSCORE"
+      );
+      return;
+    }
+
+    setUsernameStatus("checking");
+    setUsernameMessage("CHECKING USERNAME...");
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await axios.get(
+          `${API_URL}/check-username`,
+          {
+            params: {
+              username,
+            },
+          }
+        );
+
+        if (response.data?.available) {
+          setUsernameStatus("available");
+          setUsernameMessage("USERNAME AVAILABLE");
+        } else {
+          setUsernameStatus("unavailable");
+          setUsernameMessage(
+            response.data?.message ||
+              "USERNAME ALREADY EXISTS"
+          );
+        }
+      } catch (err) {
+        console.error(
+          "Username availability error:",
+          err
+        );
+
+        setUsernameStatus("error");
+        setUsernameMessage(
+          "COULD NOT CHECK USERNAME"
+        );
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [form.username]);
 
   // =====================================================
   // HANDLE CHANGE
@@ -76,7 +186,6 @@ const Register = () => {
       setSuccess("");
     }
 
-    // Start email validation immediately when typing
     if (name === "email") {
       setEmailTouched(true);
     }
@@ -92,7 +201,8 @@ const Register = () => {
     form.password === form.confirmPassword;
 
   const passwordsDoNotMatch =
-    form.confirmPassword.length > 0 && form.password !== form.confirmPassword;
+    form.confirmPassword.length > 0 &&
+    form.password !== form.confirmPassword;
 
   // =====================================================
   // PASSWORD STRENGTH
@@ -106,12 +216,13 @@ const Register = () => {
     special: /[^A-Za-z0-9]/.test(form.password),
   };
 
-  const passwordStrength = Object.values(passwordChecks).filter(Boolean).length;
+  const passwordStrength =
+    Object.values(passwordChecks).filter(Boolean).length;
 
   const isStrongPassword = passwordStrength >= 4;
 
   // =====================================================
-  // SUBMIT
+  // REGISTER
   // =====================================================
 
   const handleSubmit = async (e) => {
@@ -120,114 +231,296 @@ const Register = () => {
     setError("");
     setSuccess("");
 
-    // Username validation
-    if (!form.username.trim()) {
+    const username = form.username.trim();
+    const email = form.email.trim().toLowerCase();
+
+    // ===================================================
+    // USERNAME VALIDATION
+    // ===================================================
+
+    if (!username) {
       setError("Username is required.");
       return;
     }
 
-    if (form.username.trim().length < 3) {
-      setError("Username must contain at least 3 characters.");
+    if (username.length < 3) {
+      setError(
+        "Username must contain at least 3 characters."
+      );
       return;
     }
 
-    // Email validation
-    if (!form.email.trim()) {
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      setError(
+        "Username can only contain letters, numbers and underscore."
+      );
+      return;
+    }
+
+    if (usernameStatus === "checking") {
+      setError(
+        "Please wait while we check username availability."
+      );
+      return;
+    }
+
+    if (usernameStatus !== "available") {
+      setError(
+        "Please choose an available username."
+      );
+      return;
+    }
+
+    // ===================================================
+    // EMAIL
+    // ===================================================
+
+    if (!email) {
       setEmailTouched(true);
       setError("Email is required.");
       return;
     }
 
-    if (!isValidEmail(form.email.trim())) {
+    if (!isValidEmail(email)) {
       setEmailTouched(true);
-      setError("Please enter a valid email address.");
+      setError(
+        "Please enter a valid email address."
+      );
       return;
     }
 
-    // Password validation
+    // ===================================================
+    // PASSWORD
+    // ===================================================
+
     if (!form.password) {
       setError("Password is required.");
       return;
     }
 
-    // Confirm password validation
     if (!form.confirmPassword) {
       setError("Please confirm your password.");
       return;
     }
 
-    // Password matching
     if (!passwordsMatch) {
       setError("Passwords must match.");
       return;
     }
 
-    // Password strength
     if (!isStrongPassword) {
       setError(
-        "Password must contain at least 8 characters, uppercase, lowercase, number and special character.",
+        "Password must contain at least 8 characters, uppercase, lowercase, number and special character."
       );
       return;
     }
+
+    // ===================================================
+    // REGISTER REQUEST
+    // ===================================================
 
     try {
       setLoading(true);
 
       const registerData = {
-        username: form.username.trim(),
-        email: form.email.trim().toLowerCase(),
+        username,
+        email,
         password: form.password,
       };
 
-      console.log("Sending registration data:", {
-        username: registerData.username,
-        email: registerData.email,
-      });
+      console.log(
+        "Sending registration request:",
+        {
+          username,
+          email,
+        }
+      );
 
-      const response = await axios.post(`${API_URL}/register`, registerData, {
-        withCredentials: true,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      const response = await axios.post(
+        `${API_URL}/register`,
+        registerData,
+        {
+          withCredentials: true,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-      console.log("Registration response:", response.data);
+      console.log(
+        "Registration response:",
+        response.data
+      );
 
-      setSuccess(response.data?.message || "Account created successfully!");
+      // =================================================
+      // OPEN OTP MODAL
+      // =================================================
 
-      setForm({
-        username: "",
-        email: "",
-        password: "",
-        confirmPassword: "",
-      });
+      setOtpEmail(email);
+      setOtpError("");
+      setShowOTPModal(true);
 
-      setEmailTouched(false);
-
-      // Go to login using React Router
-      setTimeout(() => {
-        navigate("/login");
-      }, 1500);
+      setSuccess(
+        response.data?.message ||
+          "OTP sent successfully!"
+      );
     } catch (err) {
-      console.error("Registration error:", err);
+      console.error(
+        "Registration error:",
+        err
+      );
 
       if (err.response) {
         setError(
           err.response.data?.message ||
             err.response.data?.error ||
-            "Registration failed.",
+            "Registration failed."
         );
       } else if (err.request) {
         setError(
-          "Cannot connect to server. Make sure your backend is running.",
+          "Cannot connect to server. Make sure your backend is running."
         );
       } else {
-        setError("Something went wrong. Please try again.");
+        setError(
+          "Something went wrong. Please try again."
+        );
       }
     } finally {
       setLoading(false);
     }
   };
+
+  // =====================================================
+  // VERIFY REGISTRATION OTP
+  // =====================================================
+
+  const handleVerifyOTP = async (otp) => {
+    try {
+      setOtpLoading(true);
+      setOtpError("");
+
+      const cleanOTP = String(otp)
+        .replace(/\D/g, "")
+        .trim();
+
+      if (cleanOTP.length !== 6) {
+        setOtpError(
+          "Please enter the complete 6-digit OTP."
+        );
+        return;
+      }
+
+      const email = otpEmail
+        .trim()
+        .toLowerCase();
+
+      console.log(
+        "Verifying registration OTP:",
+        {
+          email,
+          otp: cleanOTP,
+          purpose: "REGISTER",
+        }
+      );
+
+      const response = await axios.post(
+        `${API_URL}/verify-registration`,
+        {
+          email,
+          otp: cleanOTP,
+          purpose: "REGISTER",
+        },
+        {
+          withCredentials: true,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log(
+        "OTP verification response:",
+        response.data
+      );
+
+      setOtpError("");
+      setShowOTPModal(false);
+
+      navigate("/success", {
+        state: {
+          type: "register",
+          email,
+          username: form.username.trim(),
+        },
+      });
+    } catch (err) {
+      console.error(
+        "OTP verification error:",
+        err
+      );
+
+      console.error(
+        "OTP verification response:",
+        err.response?.data
+      );
+
+      const message =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        "Invalid or expired OTP.";
+
+      setOtpError(message);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // =====================================================
+  // RESEND OTP
+  // =====================================================
+
+ const handleResendOTP = async () => {
+   try {
+     setOtpError("");
+
+     const email = otpEmail.trim().toLowerCase();
+
+     console.log("Resending registration OTP:", {
+       username: form.username.trim(),
+       email,
+       purpose: "REGISTER",
+     });
+
+     const response = await axios.post(
+       `${API_URL}/register`,
+       {
+         username: form.username.trim(),
+         email,
+         password: form.password,
+       },
+       {
+         withCredentials: true,
+         headers: {
+           "Content-Type": "application/json",
+         },
+       },
+     );
+
+     console.log("Resend OTP response:", response.data);
+
+     return response.data;
+   } catch (err) {
+     console.error("Resend OTP error:", err);
+
+     const message =
+       err.response?.data?.message ||
+       err.response?.data?.error ||
+       "Unable to resend OTP.";
+
+     setOtpError(message);
+     throw err;
+   }
+ };
 
   // =====================================================
   // GOOGLE
@@ -255,9 +548,13 @@ const Register = () => {
 
   const isButtonDisabled =
     loading ||
+    usernameStatus === "checking" ||
+    usernameStatus === "unavailable" ||
+    usernameStatus === "error" ||
     (form.password.length > 0 &&
       form.confirmPassword.length > 0 &&
-      (!passwordsMatch || !isStrongPassword));
+      (!passwordsMatch ||
+        !isStrongPassword));
 
   // =====================================================
   // UI
@@ -266,35 +563,43 @@ const Register = () => {
   return (
     <main
       className={`min-h-screen w-full overflow-hidden transition-colors duration-500 ${
-        darkMode ? "bg-[#08070b] text-[#f4f0df]" : "bg-[#eee9dc] text-[#17131f]"
+        darkMode
+          ? "bg-[#08070b] text-[#f4f0df]"
+          : "bg-[#eee9dc] text-[#17131f]"
       }`}
     >
-      {/* =====================================================
-          BACKGROUND
-      ===================================================== */}
+      {/* BACKGROUND */}
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div
           className={`absolute -left-52 -top-52 h-[500px] w-[500px] rounded-full blur-[150px] ${
-            darkMode ? "bg-purple-700/15" : "bg-purple-400/15"
+            darkMode
+              ? "bg-purple-700/15"
+              : "bg-purple-400/15"
           }`}
         />
 
         <div
           className={`absolute -right-52 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] ${
-            darkMode ? "bg-indigo-700/10" : "bg-indigo-400/10"
+            darkMode
+              ? "bg-indigo-700/10"
+              : "bg-indigo-400/10"
           }`}
         />
 
         <div
           className={`absolute bottom-[-200px] left-1/3 h-[450px] w-[450px] rounded-full blur-[150px] ${
-            darkMode ? "bg-fuchsia-700/10" : "bg-fuchsia-400/10"
+            darkMode
+              ? "bg-fuchsia-700/10"
+              : "bg-fuchsia-400/10"
           }`}
         />
 
         <div
           className={`absolute inset-0 ${
-            darkMode ? "opacity-[0.035]" : "opacity-[0.045]"
+            darkMode
+              ? "opacity-[0.035]"
+              : "opacity-[0.045]"
           }`}
           style={{
             backgroundImage: `
@@ -306,17 +611,15 @@ const Register = () => {
         />
       </div>
 
-      {/* =====================================================
-          HEADER
-      ===================================================== */}
+      {/* HEADER */}
 
       <header
         className={`relative z-30 mx-auto flex h-16 max-w-[1600px] items-center justify-between border-b px-5 sm:px-8 lg:px-14 xl:px-20 ${
-          darkMode ? "border-purple-500/10" : "border-purple-900/10"
+          darkMode
+            ? "border-purple-500/10"
+            : "border-purple-900/10"
         }`}
       >
-        {/* LOGO / SITE NAME */}
-
         <button
           type="button"
           onClick={handleHome}
@@ -334,7 +637,9 @@ const Register = () => {
 
             <p
               className={`font-mono text-[8px] tracking-[0.25em] ${
-                darkMode ? "text-white/30" : "text-black/40"
+                darkMode
+                  ? "text-white/30"
+                  : "text-black/40"
               }`}
             >
               CANDIDATE PORTAL
@@ -342,11 +647,7 @@ const Register = () => {
           </div>
         </button>
 
-        {/* RIGHT HEADER */}
-
         <div className="flex items-center gap-2">
-          {/* HOME BUTTON */}
-
           <button
             type="button"
             onClick={handleHome}
@@ -360,8 +661,6 @@ const Register = () => {
             Home
           </button>
 
-          {/* THEME */}
-
           <button
             type="button"
             onClick={toggleTheme}
@@ -372,14 +671,16 @@ const Register = () => {
                 : "border-black/15 bg-white/70 text-purple-700 hover:border-purple-500"
             }`}
           >
-            {darkMode ? <FiSun size={16} /> : <FiMoon size={16} />}
+            {darkMode ? (
+              <FiSun size={16} />
+            ) : (
+              <FiMoon size={16} />
+            )}
           </button>
         </div>
       </header>
 
-      {/* =====================================================
-          MAIN
-      ===================================================== */}
+      {/* MAIN */}
 
       <div
         className="
@@ -404,14 +705,10 @@ const Register = () => {
           xl:px-20
         "
       >
-        {/* =====================================================
-            LEFT SIDE
-        ===================================================== */}
+        {/* LEFT */}
 
         <section className="hidden min-h-0 lg:flex">
           <div className="w-full max-w-3xl">
-            {/* STATUS */}
-
             <div className="mb-4">
               <div
                 className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[8px] tracking-[0.2em] ${
@@ -425,27 +722,26 @@ const Register = () => {
               </div>
             </div>
 
-            {/* HEADING */}
-
             <h1 className="font-mono text-5xl font-black uppercase leading-[0.9] tracking-tight xl:text-6xl">
               Start your
               <br />
-              <span className="text-purple-500">journey.</span>
+              <span className="text-purple-500">
+                journey.
+              </span>
             </h1>
-
-            {/* DESCRIPTION */}
 
             <p
               className={`mt-4 max-w-xl font-mono text-xs leading-5 xl:text-sm ${
-                darkMode ? "text-white/40" : "text-black/55"
+                darkMode
+                  ? "text-white/40"
+                  : "text-black/55"
               }`}
             >
-              Create your candidate profile and unlock intelligent interview
-              preparation, personalized practice sessions, progress tracking,
-              and career-focused insights.
+              Create your candidate profile and unlock
+              intelligent interview preparation,
+              personalized practice sessions, progress
+              tracking, and career-focused insights.
             </p>
-
-            {/* COMMAND */}
 
             <div
               className={`mt-5 max-w-xl border-2 px-4 py-3 font-mono ${
@@ -456,24 +752,30 @@ const Register = () => {
             >
               <p
                 className={`text-[10px] ${
-                  darkMode ? "text-white/30" : "text-black/40"
+                  darkMode
+                    ? "text-white/30"
+                    : "text-black/40"
                 }`}
               >
                 ~/candidate
               </p>
 
               <p className="mt-1.5 text-xs">
-                <span className="text-purple-400">$</span>{" "}
-                <span className="text-purple-400">initialize</span>{" "}
-                <span className="text-green-400">--profile</span>
+                <span className="text-purple-400">
+                  $
+                </span>{" "}
+                <span className="text-purple-400">
+                  initialize
+                </span>{" "}
+                <span className="text-green-400">
+                  --profile
+                </span>
               </p>
 
               <p className="mt-1.5 text-[10px] text-green-400">
                 ✓ Candidate workspace ready
               </p>
             </div>
-
-            {/* FEATURES */}
 
             <div className="mt-5 grid max-w-2xl grid-cols-3 gap-3">
               <FeatureCard
@@ -503,14 +805,10 @@ const Register = () => {
           </div>
         </section>
 
-        {/* =====================================================
-            RIGHT SIDE
-        ===================================================== */}
+        {/* RIGHT */}
 
         <section className="flex min-h-0 w-full items-center justify-center">
           <div className="w-full max-w-[450px]">
-            {/* CARD */}
-
             <div
               className={`border-2 transition-colors duration-500 ${
                 darkMode
@@ -533,7 +831,9 @@ const Register = () => {
 
                 <span
                   className={`font-mono text-[7px] tracking-widest ${
-                    darkMode ? "text-white/25" : "text-black/30"
+                    darkMode
+                      ? "text-white/25"
+                      : "text-black/30"
                   }`}
                 >
                   NEW ACCOUNT
@@ -543,8 +843,6 @@ const Register = () => {
               {/* CARD BODY */}
 
               <div className="px-5 py-3">
-                {/* TITLE */}
-
                 <div className="mb-3">
                   <div className="mb-2 flex items-center gap-3">
                     <div className="flex h-8 w-8 items-center justify-center border-2 border-purple-500 bg-purple-600 shadow-[3px_3px_0px_#312e81]">
@@ -560,7 +858,9 @@ const Register = () => {
 
                       <p
                         className={`font-mono text-[6px] ${
-                          darkMode ? "text-white/25" : "text-black/35"
+                          darkMode
+                            ? "text-white/25"
+                            : "text-black/35"
                         }`}
                       >
                         CREATE YOUR ACCOUNT
@@ -569,15 +869,21 @@ const Register = () => {
                   </div>
 
                   <h2 className="font-mono text-xl font-black uppercase">
-                    Create <span className="text-purple-500">profile.</span>
+                    Create{" "}
+                    <span className="text-purple-500">
+                      profile.
+                    </span>
                   </h2>
 
                   <p
                     className={`mt-0.5 font-mono text-[8px] leading-3 ${
-                      darkMode ? "text-white/35" : "text-black/45"
+                      darkMode
+                        ? "text-white/35"
+                        : "text-black/45"
                     }`}
                   >
-                    Create your candidate account to start preparing.
+                    Create your candidate account to
+                    start preparing.
                   </p>
                 </div>
 
@@ -596,8 +902,6 @@ const Register = () => {
                   Continue with Google
                 </button>
 
-                {/* DIVIDER */}
-
                 <div className="my-2 flex items-center gap-3">
                   <div className="h-[1px] flex-1 bg-purple-500/20" />
 
@@ -610,20 +914,71 @@ const Register = () => {
 
                 {/* FORM */}
 
-                <form onSubmit={handleSubmit} className="space-y-2">
+                <form
+                  onSubmit={handleSubmit}
+                  className="space-y-2"
+                >
                   {/* USERNAME */}
 
-                  <InputField
-                    label="Username"
-                    name="username"
-                    value={form.username}
-                    onChange={handleChange}
-                    type="text"
-                    placeholder="candidate_username"
-                    icon={<FiUser size={13} />}
-                    darkMode={darkMode}
-                    autoComplete="username"
-                  />
+                  <div>
+                    <InputField
+                      label="Username"
+                      name="username"
+                      value={form.username}
+                      onChange={handleChange}
+                      type="text"
+                      placeholder="candidate_username"
+                      icon={<FiUser size={13} />}
+                      darkMode={darkMode}
+                      autoComplete="username"
+                      isValid={
+                        usernameStatus === "available"
+                      }
+                      isInvalid={
+                        usernameStatus === "unavailable" ||
+                        usernameStatus === "error"
+                      }
+                    />
+
+                    {form.username.trim().length > 0 && (
+                      <div
+                        className={`mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold ${
+                          usernameStatus === "available"
+                            ? "text-green-400"
+                            : usernameStatus ===
+                                "unavailable"
+                              ? "text-red-400"
+                              : usernameStatus ===
+                                  "checking"
+                                ? "text-yellow-400"
+                                : usernameStatus ===
+                                    "error"
+                                  ? "text-red-400"
+                                  : darkMode
+                                    ? "text-white/30"
+                                    : "text-black/40"
+                        }`}
+                      >
+                        {usernameStatus ===
+                          "checking" && (
+                          <span className="h-2 w-2 animate-spin rounded-full border border-yellow-400/30 border-t-yellow-400" />
+                        )}
+
+                        {usernameStatus ===
+                          "available" && (
+                          <FiCheck size={8} />
+                        )}
+
+                        {(usernameStatus ===
+                          "unavailable" ||
+                          usernameStatus === "error") && (
+                          <FiX size={8} />
+                        )}
+
+                        {usernameMessage}
+                      </div>
+                    )}
+                  </div>
 
                   {/* EMAIL */}
 
@@ -633,7 +988,9 @@ const Register = () => {
                       name="email"
                       value={form.email}
                       onChange={handleChange}
-                      onBlur={() => setEmailTouched(true)}
+                      onBlur={() =>
+                        setEmailTouched(true)
+                      }
                       type="email"
                       placeholder="candidate@email.com"
                       icon={<FiMail size={13} />}
@@ -642,8 +999,6 @@ const Register = () => {
                       isValid={emailIsValid}
                       isInvalid={emailIsInvalid}
                     />
-
-                    {/* REAL-TIME EMAIL STATUS */}
 
                     {emailIsValid && (
                       <div className="mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold text-green-400">
@@ -682,7 +1037,11 @@ const Register = () => {
                         name="password"
                         value={form.password}
                         onChange={handleChange}
-                        type={showPassword ? "text" : "password"}
+                        type={
+                          showPassword
+                            ? "text"
+                            : "password"
+                        }
                         placeholder="Create password"
                         required
                         autoComplete="new-password"
@@ -695,9 +1054,15 @@ const Register = () => {
 
                       <button
                         type="button"
-                        onClick={() => setShowPassword((prev) => !prev)}
+                        onClick={() =>
+                          setShowPassword(
+                            (prev) => !prev
+                          )
+                        }
                         className={`flex w-8 shrink-0 items-center justify-center border-l-2 border-inherit ${
-                          darkMode ? "text-white/30" : "text-black/30"
+                          darkMode
+                            ? "text-white/30"
+                            : "text-black/30"
                         }`}
                       >
                         {showPassword ? (
@@ -708,52 +1073,63 @@ const Register = () => {
                       </button>
                     </div>
 
-                    {/* PASSWORD STRENGTH */}
-
                     {form.password.length > 0 && (
                       <div className="mt-1">
                         <div className="flex gap-1">
-                          {[1, 2, 3, 4, 5].map((level) => (
-                            <div
-                              key={level}
-                              className={`h-[3px] flex-1 ${
-                                passwordStrength >= level
-                                  ? "bg-purple-500"
-                                  : darkMode
-                                    ? "bg-white/10"
-                                    : "bg-black/10"
-                              }`}
-                            />
-                          ))}
+                          {[1, 2, 3, 4, 5].map(
+                            (level) => (
+                              <div
+                                key={level}
+                                className={`h-[3px] flex-1 ${
+                                  passwordStrength >=
+                                  level
+                                    ? "bg-purple-500"
+                                    : darkMode
+                                      ? "bg-white/10"
+                                      : "bg-black/10"
+                                }`}
+                              />
+                            )
+                          )}
                         </div>
 
                         <div className="mt-1 grid grid-cols-3 gap-x-2">
                           <PasswordRequirement
-                            valid={passwordChecks.length}
+                            valid={
+                              passwordChecks.length
+                            }
                             text="8+ CHARS"
                             darkMode={darkMode}
                           />
 
                           <PasswordRequirement
-                            valid={passwordChecks.uppercase}
+                            valid={
+                              passwordChecks.uppercase
+                            }
                             text="UPPERCASE"
                             darkMode={darkMode}
                           />
 
                           <PasswordRequirement
-                            valid={passwordChecks.lowercase}
+                            valid={
+                              passwordChecks.lowercase
+                            }
                             text="LOWERCASE"
                             darkMode={darkMode}
                           />
 
                           <PasswordRequirement
-                            valid={passwordChecks.number}
+                            valid={
+                              passwordChecks.number
+                            }
                             text="NUMBER"
                             darkMode={darkMode}
                           />
 
                           <PasswordRequirement
-                            valid={passwordChecks.special}
+                            valid={
+                              passwordChecks.special
+                            }
                             text="SPECIAL"
                             darkMode={darkMode}
                           />
@@ -778,7 +1154,11 @@ const Register = () => {
                             : darkMode
                               ? "border-[#302c38]"
                               : "border-black/15"
-                      } ${darkMode ? "bg-[#0b0a0e]" : "bg-white"}`}
+                      } ${
+                        darkMode
+                          ? "bg-[#0b0a0e]"
+                          : "bg-white"
+                      }`}
                     >
                       <div
                         className={`flex w-8 shrink-0 items-center justify-center border-r-2 border-inherit ${
@@ -796,7 +1176,11 @@ const Register = () => {
                         name="confirmPassword"
                         value={form.confirmPassword}
                         onChange={handleChange}
-                        type={showConfirmPassword ? "text" : "password"}
+                        type={
+                          showConfirmPassword
+                            ? "text"
+                            : "password"
+                        }
                         placeholder="Confirm password"
                         required
                         autoComplete="new-password"
@@ -809,9 +1193,15 @@ const Register = () => {
 
                       <button
                         type="button"
-                        onClick={() => setShowConfirmPassword((prev) => !prev)}
+                        onClick={() =>
+                          setShowConfirmPassword(
+                            (prev) => !prev
+                          )
+                        }
                         className={`flex w-8 shrink-0 items-center justify-center border-l-2 border-inherit ${
-                          darkMode ? "text-white/30" : "text-black/30"
+                          darkMode
+                            ? "text-white/30"
+                            : "text-black/30"
                         }`}
                       >
                         {showConfirmPassword ? (
@@ -821,8 +1211,6 @@ const Register = () => {
                         )}
                       </button>
                     </div>
-
-                    {/* REAL-TIME PASSWORD MATCH */}
 
                     {passwordsMatch && (
                       <div className="mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold text-green-400">
@@ -850,10 +1238,13 @@ const Register = () => {
 
                     <span
                       className={`font-mono text-[6px] uppercase ${
-                        darkMode ? "text-white/30" : "text-black/45"
+                        darkMode
+                          ? "text-white/30"
+                          : "text-black/45"
                       }`}
                     >
-                      I agree to the terms and privacy policy
+                      I agree to the terms and privacy
+                      policy
                     </span>
                   </label>
 
@@ -891,8 +1282,11 @@ const Register = () => {
                     {loading ? (
                       <>
                         <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                        Creating Account...
+                        Sending OTP...
                       </>
+                    ) : usernameStatus ===
+                      "checking" ? (
+                      <>Checking Username...</>
                     ) : (
                       <>
                         Create Account
@@ -909,12 +1303,16 @@ const Register = () => {
 
                 <div
                   className={`mt-2 border-t-2 pt-2 text-center ${
-                    darkMode ? "border-[#25222c]" : "border-black/10"
+                    darkMode
+                      ? "border-[#25222c]"
+                      : "border-black/10"
                   }`}
                 >
                   <p
                     className={`font-mono text-[7px] uppercase ${
-                      darkMode ? "text-white/50" : "text-black/55"
+                      darkMode
+                        ? "text-white/50"
+                        : "text-black/55"
                     }`}
                   >
                     Already have an account?
@@ -926,6 +1324,7 @@ const Register = () => {
                     className="group mt-0.5 inline-flex items-center gap-2 font-mono text-[9px] font-black uppercase tracking-wider text-purple-500 hover:text-purple-400"
                   >
                     Sign In
+
                     <FiArrowRight
                       size={11}
                       className="transition-transform group-hover:translate-x-1"
@@ -949,6 +1348,25 @@ const Register = () => {
           </div>
         </section>
       </div>
+
+      {/* OTP MODAL */}
+
+      <OTPModal
+        isOpen={showOTPModal}
+        email={otpEmail}
+        darkMode={darkMode}
+        loading={otpLoading}
+        error={otpError}
+        purpose="REGISTER"
+        onClose={() => {
+          if (!otpLoading) {
+            setShowOTPModal(false);
+            setOtpError("");
+          }
+        }}
+        onVerify={handleVerifyOTP}
+        onResend={handleResendOTP}
+      />
     </main>
   );
 };
@@ -1036,14 +1454,26 @@ const InputField = ({
 // PASSWORD REQUIREMENT
 // =====================================================
 
-const PasswordRequirement = ({ valid, text, darkMode }) => {
+const PasswordRequirement = ({
+  valid,
+  text,
+  darkMode,
+}) => {
   return (
     <div
       className={`flex items-center gap-1 font-mono text-[5px] ${
-        valid ? "text-green-400" : darkMode ? "text-white/25" : "text-black/35"
+        valid
+          ? "text-green-400"
+          : darkMode
+            ? "text-white/25"
+            : "text-black/35"
       }`}
     >
-      {valid ? <FiCheck size={7} /> : <FiX size={7} />}
+      {valid ? (
+        <FiCheck size={7} />
+      ) : (
+        <FiX size={7} />
+      )}
 
       {text}
     </div>
@@ -1054,7 +1484,13 @@ const PasswordRequirement = ({ valid, text, darkMode }) => {
 // FEATURE CARD
 // =====================================================
 
-const FeatureCard = ({ icon, title, description, iconClass, darkMode }) => {
+const FeatureCard = ({
+  icon,
+  title,
+  description,
+  iconClass,
+  darkMode,
+}) => {
   return (
     <div
       className={`border-2 p-3 transition-all duration-300 hover:-translate-y-1 ${
@@ -1063,13 +1499,19 @@ const FeatureCard = ({ icon, title, description, iconClass, darkMode }) => {
           : "border-black/10 bg-white/50"
       }`}
     >
-      <div className={`mb-2 ${iconClass}`}>{icon}</div>
+      <div className={`mb-2 ${iconClass}`}>
+        {icon}
+      </div>
 
-      <p className="font-mono text-[9px] font-bold">{title}</p>
+      <p className="font-mono text-[9px] font-bold">
+        {title}
+      </p>
 
       <p
         className={`mt-1 font-mono text-[7px] leading-3 ${
-          darkMode ? "text-white/30" : "text-black/40"
+          darkMode
+            ? "text-white/30"
+            : "text-black/40"
         }`}
       >
         {description}
@@ -1079,3 +1521,4 @@ const FeatureCard = ({ icon, title, description, iconClass, darkMode }) => {
 };
 
 export default Register;
+

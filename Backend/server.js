@@ -1,8 +1,8 @@
+require("dotenv").config();
 const app = require("./src/app");
 const connectToDB = require("./src/config/database");
 const { connectRedis } = require("./src/config/redis");
-
-require("dotenv").config();
+console.log("JWT_SECRET_KEY:", process.env.JWT_SECRET_KEY);
 
 const port = process.env.PORT || 3000;
 

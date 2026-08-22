@@ -5,8 +5,10 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "googleapis": "^176.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.3",
+    "nodemailer": "^9.0.5",
     "redis": "^6.2.1"
   },
   "name": "backend",
