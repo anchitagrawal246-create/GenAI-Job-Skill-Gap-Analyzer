@@ -10,25 +10,38 @@ import {
   FiSun,
   FiMoon,
   FiShield,
-  FiCheck,
-  FiAlertCircle,
   FiHome,
+  FiAlertCircle,
 } from "react-icons/fi";
 
-import { forgotPassword } from "../../../api/auth.api";
+import {
+  forgotPassword,
+  verifyPasswordOTP,
+} from "../../../api/auth.api";
+
+import OTPModal from "../components/OTPModal";
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
   const { darkMode, toggleTheme } = useTheme();
 
+  // =====================================================
+  // STATE
+  // =====================================================
+
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+
+  // OTP MODAL
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
 
   // =====================================================
-  // HANDLE CHANGE
+  // HANDLE INPUT CHANGE
   // =====================================================
 
   const handleChange = (e) => {
@@ -38,20 +51,20 @@ const ForgotPassword = () => {
       setError("");
     }
 
-    if (success) {
-      setSuccess("");
+    if (otpError) {
+      setOtpError("");
     }
   };
 
   // =====================================================
-  // SUBMIT
+  // SEND OTP
   // =====================================================
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     setError("");
-    setSuccess("");
+    setOtpError("");
 
     const trimmedUsername = username.trim();
 
@@ -63,33 +76,47 @@ const ForgotPassword = () => {
     try {
       setLoading(true);
 
+      console.log("Sending forgot password OTP:", {
+        identifier: trimmedUsername,
+      });
+
       const data = await forgotPassword({
         username: trimmedUsername,
       });
 
-      console.log("Forgot password response:", data);
-
-      setSuccess(
-        data?.message ||
-          "If the account exists, an OTP has been sent to your registered email.",
+      console.log(
+        "Forgot password response:",
+        data,
       );
 
       /*
-       * You can navigate to your OTP page here.
+       * Backend may return the email in different places.
        *
        * Example:
-       *
-       * navigate("/verify-password-otp", {
-       *   state: {
-       *     username: trimmedUsername,
-       *   },
-       * });
-       *
-       * I am leaving it commented so you can first test
-       * the API response.
+       * {
+       *   success: true,
+       *   message: "OTP sent successfully",
+       *   email: "a***@gmail.com"
+       * }
        */
+
+      const email =
+        data?.email ||
+        data?.data?.email ||
+        data?.user?.email ||
+        trimmedUsername;
+
+      setOtpEmail(email);
+
+      setOtpError("");
+
+      // Open OTP modal
+      setShowOTPModal(true);
     } catch (err) {
-      console.error("Forgot password error:", err);
+      console.error(
+        "Forgot password error:",
+        err,
+      );
 
       const backendMessage =
         err?.response?.data?.message ||
@@ -97,10 +124,142 @@ const ForgotPassword = () => {
         err?.message;
 
       setError(
-        backendMessage || "Unable to process your request. Please try again.",
+        backendMessage ||
+          "Unable to process your request. Please try again.",
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  // =====================================================
+  // VERIFY OTP
+  // =====================================================
+
+  const handleVerifyOTP = async (otp) => {
+    try {
+      setOtpLoading(true);
+      setOtpError("");
+
+      const trimmedUsername = username.trim();
+
+      console.log(
+        "Verifying password reset OTP:",
+        {
+          identifier: trimmedUsername,
+          otp,
+        },
+      );
+
+      const data = await verifyPasswordOTP({
+        username: trimmedUsername,
+        otp,
+      });
+
+      console.log(
+        "Verify password OTP response:",
+        data,
+      );
+
+      /*
+       * OTP VERIFIED
+       *
+       * Navigate to reset-password page.
+       *
+       * If your backend returns a reset token,
+       * pass it to the reset page.
+       */
+
+      const resetToken =
+        data?.resetToken ||
+        data?.token ||
+        data?.data?.resetToken ||
+        data?.data?.token ||
+        null;
+
+      setShowOTPModal(false);
+
+      navigate("/reset-password", {
+        state: {
+          username: trimmedUsername,
+          identifier: trimmedUsername,
+          verified: true,
+          resetToken,
+          otp,
+        },
+      });
+    } catch (err) {
+      console.error(
+        "Verify password OTP error:",
+        err,
+      );
+
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        "Invalid or expired OTP.";
+
+      setOtpError(message);
+
+      throw err;
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // =====================================================
+  // RESEND OTP
+  // =====================================================
+
+  const handleResendOTP = async () => {
+    try {
+      setOtpError("");
+
+      const trimmedUsername = username.trim();
+
+      if (!trimmedUsername) {
+        throw new Error(
+          "Username is required.",
+        );
+      }
+
+      console.log(
+        "Resending forgot password OTP:",
+        {
+          identifier: trimmedUsername,
+        },
+      );
+
+      const data = await forgotPassword({
+        username: trimmedUsername,
+      });
+
+      console.log(
+        "Resend OTP response:",
+        data,
+      );
+
+      /*
+       * OTPModal expects onResend()
+       * to return response.data.
+       */
+
+      return data;
+    } catch (err) {
+      console.error(
+        "Resend OTP error:",
+        err,
+      );
+
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Unable to resend OTP.";
+
+      setOtpError(message);
+
+      throw err;
     }
   };
 
@@ -118,8 +277,10 @@ const ForgotPassword = () => {
 
   return (
     <main
-      className={`min-h-screen w-full transition-colors duration-500 ${
-        darkMode ? "bg-[#08070b] text-[#f4f0df]" : "bg-[#eee9dc] text-[#17131f]"
+      className={`min-h-screen w-full overflow-hidden transition-colors duration-500 ${
+        darkMode
+          ? "bg-[#08070b] text-[#f4f0df]"
+          : "bg-[#eee9dc] text-[#17131f]"
       }`}
     >
       {/* =====================================================
@@ -127,32 +288,55 @@ const ForgotPassword = () => {
       ===================================================== */}
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        {/* Purple glow */}
+
         <div
           className={`absolute -left-52 -top-52 h-[500px] w-[500px] rounded-full blur-[150px] ${
-            darkMode ? "bg-purple-700/15" : "bg-purple-400/15"
+            darkMode
+              ? "bg-purple-700/15"
+              : "bg-purple-400/15"
           }`}
         />
+
+        {/* Indigo glow */}
 
         <div
           className={`absolute -right-52 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] ${
-            darkMode ? "bg-indigo-700/10" : "bg-indigo-400/10"
+            darkMode
+              ? "bg-indigo-700/10"
+              : "bg-indigo-400/10"
           }`}
         />
+
+        {/* Fuchsia glow */}
 
         <div
           className={`absolute bottom-[-200px] left-1/3 h-[450px] w-[450px] rounded-full blur-[150px] ${
-            darkMode ? "bg-fuchsia-700/10" : "bg-fuchsia-400/10"
+            darkMode
+              ? "bg-fuchsia-700/10"
+              : "bg-fuchsia-400/10"
           }`}
         />
 
+        {/* Grid */}
+
         <div
           className={`absolute inset-0 ${
-            darkMode ? "opacity-[0.035]" : "opacity-[0.045]"
+            darkMode
+              ? "opacity-[0.035]"
+              : "opacity-[0.045]"
           }`}
           style={{
             backgroundImage: `
-              linear-gradient(#8b5cf6 1px, transparent 1px),
-              linear-gradient(90deg, #8b5cf6 1px, transparent 1px)
+              linear-gradient(
+                #8b5cf6 1px,
+                transparent 1px
+              ),
+              linear-gradient(
+                90deg,
+                #8b5cf6 1px,
+                transparent 1px
+              )
             `,
             backgroundSize: "55px 55px",
           }}
@@ -165,7 +349,9 @@ const ForgotPassword = () => {
 
       <header
         className={`relative z-30 mx-auto flex h-16 max-w-[1600px] items-center justify-between border-b px-5 sm:px-8 lg:px-14 xl:px-20 ${
-          darkMode ? "border-purple-500/10" : "border-purple-900/10"
+          darkMode
+            ? "border-purple-500/10"
+            : "border-purple-900/10"
         }`}
       >
         {/* LOGO */}
@@ -179,7 +365,8 @@ const ForgotPassword = () => {
         >
           <div
             className="
-              flex h-9 w-9 items-center justify-center
+              flex h-9 w-9
+              items-center justify-center
               border-2 border-purple-500
               bg-purple-600
               shadow-[3px_3px_0px_#312e81]
@@ -206,7 +393,9 @@ const ForgotPassword = () => {
 
             <p
               className={`font-mono text-[8px] tracking-[0.25em] ${
-                darkMode ? "text-white/30" : "text-black/40"
+                darkMode
+                  ? "text-white/30"
+                  : "text-black/40"
               }`}
             >
               CANDIDATE PORTAL
@@ -232,7 +421,9 @@ const ForgotPassword = () => {
           >
             <FiHome size={14} />
 
-            <span className="hidden sm:inline">Home</span>
+            <span className="hidden sm:inline">
+              Home
+            </span>
           </button>
 
           {/* THEME */}
@@ -248,7 +439,11 @@ const ForgotPassword = () => {
                 : "border-black/15 bg-white/70 text-purple-700 hover:border-purple-500"
             }`}
           >
-            {darkMode ? <FiSun size={16} /> : <FiMoon size={16} />}
+            {darkMode ? (
+              <FiSun size={16} />
+            ) : (
+              <FiMoon size={16} />
+            )}
           </button>
         </div>
       </header>
@@ -283,7 +478,9 @@ const ForgotPassword = () => {
 
               <span
                 className={`font-mono text-[7px] tracking-widest ${
-                  darkMode ? "text-white/25" : "text-black/30"
+                  darkMode
+                    ? "text-white/25"
+                    : "text-black/30"
                 }`}
               >
                 ACCOUNT ACCESS
@@ -317,7 +514,8 @@ const ForgotPassword = () => {
                 <div className="mb-3 flex items-center gap-3">
                   <div
                     className="
-                      flex h-9 w-9 items-center justify-center
+                      flex h-9 w-9
+                      items-center justify-center
                       border-2 border-purple-500
                       bg-purple-600
                       shadow-[3px_3px_0px_#312e81]
@@ -333,7 +531,9 @@ const ForgotPassword = () => {
 
                     <p
                       className={`font-mono text-[7px] ${
-                        darkMode ? "text-white/25" : "text-black/35"
+                        darkMode
+                          ? "text-white/25"
+                          : "text-black/35"
                       }`}
                     >
                       RESET YOUR PASSWORD
@@ -342,15 +542,21 @@ const ForgotPassword = () => {
                 </div>
 
                 <h1 className="font-mono text-xl font-black uppercase">
-                  Forgot <span className="text-purple-500">password?</span>
+                  Forgot{" "}
+                  <span className="text-purple-500">
+                    password?
+                  </span>
                 </h1>
 
                 <p
                   className={`mt-2 font-mono text-[9px] leading-4 ${
-                    darkMode ? "text-white/35" : "text-black/45"
+                    darkMode
+                      ? "text-white/35"
+                      : "text-black/45"
                   }`}
                 >
-                  Enter your username and we'll send a secure OTP to your
+                  Enter your username and we'll
+                  send a secure OTP to your
                   registered email address.
                 </p>
               </div>
@@ -371,25 +577,12 @@ const ForgotPassword = () => {
                 </div>
               )}
 
-              {/* SUCCESS */}
-
-              {success && (
-                <div
-                  className={`mb-4 flex items-center gap-2 border-2 px-3 py-2 font-mono text-[9px] ${
-                    darkMode
-                      ? "border-green-500/40 bg-green-500/10 text-green-300"
-                      : "border-green-500/30 bg-green-50 text-green-600"
-                  }`}
-                >
-                  <FiCheck size={14} />
-
-                  <span>{success}</span>
-                </div>
-              )}
-
               {/* FORM */}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form
+                onSubmit={handleSubmit}
+                className="space-y-4"
+              >
                 {/* USERNAME */}
 
                 <div>
@@ -426,7 +619,7 @@ const ForgotPassword = () => {
                   </div>
                 </div>
 
-                {/* SUBMIT */}
+                {/* SEND OTP */}
 
                 <button
                   type="submit"
@@ -458,6 +651,7 @@ const ForgotPassword = () => {
                   ) : (
                     <>
                       Send OTP
+
                       <FiArrowRight
                         size={15}
                         className="transition-transform group-hover:translate-x-1"
@@ -467,16 +661,20 @@ const ForgotPassword = () => {
                 </button>
               </form>
 
-              {/* LOGIN FOOTER */}
+              {/* FOOTER */}
 
               <div
                 className={`mt-5 border-t-2 pt-4 text-center ${
-                  darkMode ? "border-[#25222c]" : "border-black/10"
+                  darkMode
+                    ? "border-[#25222c]"
+                    : "border-black/10"
                 }`}
               >
                 <p
                   className={`font-mono text-[9px] font-semibold uppercase tracking-wide ${
-                    darkMode ? "text-white/40" : "text-black/50"
+                    darkMode
+                      ? "text-white/40"
+                      : "text-black/50"
                   }`}
                 >
                   Remember your password?
@@ -497,6 +695,7 @@ const ForgotPassword = () => {
                   "
                 >
                   Sign In
+
                   <FiArrowRight
                     size={14}
                     className="transition-transform group-hover:translate-x-1"
@@ -504,7 +703,7 @@ const ForgotPassword = () => {
                 </button>
               </div>
 
-              {/* FOOTER */}
+              {/* SECURITY FOOTER */}
 
               <div
                 className={`mt-4 border-t pt-2 text-center font-mono text-[7px] uppercase tracking-widest ${
@@ -519,8 +718,31 @@ const ForgotPassword = () => {
           </div>
         </div>
       </div>
+
+      {/* =====================================================
+          OTP MODAL
+      ===================================================== */}
+
+      <OTPModal
+        isOpen={showOTPModal}
+        email={otpEmail}
+        darkMode={darkMode}
+        loading={otpLoading}
+        error={otpError}
+        purpose="forgot-password"
+        resendCooldown={60}
+        onClose={() => {
+          if (!otpLoading) {
+            setShowOTPModal(false);
+            setOtpError("");
+          }
+        }}
+        onVerify={handleVerifyOTP}
+        onResend={handleResendOTP}
+      />
     </main>
   );
 };
 
 export default ForgotPassword;
+

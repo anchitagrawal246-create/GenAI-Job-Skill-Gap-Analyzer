@@ -19,15 +19,18 @@ const API = axios.create({
 
 export const registerUser = async (userData) => {
   const response = await API.post("/auth/register", userData);
-
   return response.data;
 };
 
 // =====================================================
-// VERIFY OTP
+// VERIFY REGISTRATION OTP
 // =====================================================
 
-export const verifyOTP = async ({ email, otp, purpose = "register" }) => {
+export const verifyOTP = async ({
+  email,
+  otp,
+  purpose = "register",
+}) => {
   const response = await API.post("/auth/verify-registration", {
     email,
     otp,
@@ -59,7 +62,6 @@ export const resendOTP = async ({
 
 export const loginUser = async (userData) => {
   const response = await API.post("/auth/login", userData);
-
   return response.data;
 };
 
@@ -67,11 +69,56 @@ export const loginUser = async (userData) => {
 // FORGOT PASSWORD
 // =====================================================
 
-export const forgotPassword = async (data) => {
-  const response = await API.post("/auth/forgot-password", data);
+export const forgotPassword = async ({ username }) => {
+  const response = await API.post("/auth/forgot-password", {
+    username,
+  });
 
   return response.data;
 };
+
+// =====================================================
+// VERIFY PASSWORD RESET OTP
+// =====================================================
+
+export const verifyPasswordOTP = async ({
+  username,
+  otp,
+}) => {
+  const response = await API.post("/auth/verify-password-otp", {
+    username,
+    otp,
+  });
+
+  return response.data;
+};
+
+
+// =====================================================
+// RESET PASSWORD
+// =====================================================
+
+export const resetPassword = async ({
+  resetToken,
+  newPassword,
+  confirmPassword,
+}) => {
+  console.log("RESET PASSWORD REQUEST:", {
+    resetToken,
+    newPassword,
+    confirmPassword,
+  });
+
+  const response = await API.post("/auth/reset-password", {
+    resetToken,
+    newPassword,
+    confirmPassword,
+  });
+
+  return response.data;
+};
+
+
 
 // =====================================================
 // CHECK USERNAME
