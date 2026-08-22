@@ -11,10 +11,15 @@ import {
   FiSun,
   FiCheck,
 } from "react-icons/fi";
-import { useState } from "react";
+
+
+import { useNavigate } from "react-router-dom";
+import { useTheme } from "../../context/theme.context";
 
 const Landing = () => {
-  const [darkMode, setDarkMode] = useState(true);
+  const navigate = useNavigate();
+const { darkMode, toggleTheme } = useTheme();
+ 
 
   const features = [
     {
@@ -92,26 +97,21 @@ const Landing = () => {
         darkMode ? "bg-[#08070b] text-[#f4f0df]" : "bg-[#eee9dc] text-[#17131f]"
       }`}
     >
-      {/* =====================================================
-          BACKGROUND
-      ====================================================== */}
+      {/* ================= BACKGROUND ================= */}
 
       <div className="pointer-events-none fixed inset-0 z-0 w-full overflow-clip">
-        {/* Purple Glow */}
         <div
           className={`absolute -left-48 -top-48 h-[500px] w-[500px] rounded-full blur-[150px] ${
             darkMode ? "bg-purple-700/15" : "bg-purple-400/15"
           }`}
         />
 
-        {/* Blue Glow */}
         <div
           className={`absolute -right-48 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] ${
             darkMode ? "bg-indigo-700/10" : "bg-indigo-400/15"
           }`}
         />
 
-        {/* Retro Grid */}
         <div
           className={`absolute inset-0 ${
             darkMode ? "opacity-[0.035]" : "opacity-[0.05]"
@@ -126,9 +126,7 @@ const Landing = () => {
         />
       </div>
 
-      {/* =====================================================
-          HEADER
-      ====================================================== */}
+      {/* ================= HEADER ================= */}
 
       <header
         className={`relative z-30 mx-auto flex h-16 w-full max-w-7xl items-center justify-between border-b px-5 sm:px-8 ${
@@ -136,6 +134,7 @@ const Landing = () => {
         }`}
       >
         {/* Logo */}
+
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-purple-500 bg-purple-600 shadow-[3px_3px_0px_#312e81]">
             <FiCpu size={17} />
@@ -157,6 +156,7 @@ const Landing = () => {
         </div>
 
         {/* Navigation */}
+
         <nav className="hidden items-center gap-7 md:flex">
           <a
             href="#features"
@@ -192,11 +192,15 @@ const Landing = () => {
           </a>
         </nav>
 
-        {/* Right */}
+        {/* Right Side */}
+
         <div className="flex items-center gap-3">
+          {/* Theme */}
+
           <button
             type="button"
-            onClick={() => setDarkMode(!darkMode)}
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
             className={`flex h-9 w-9 shrink-0 items-center justify-center border-2 transition ${
               darkMode
                 ? "border-[#302c38] bg-[#15131a] text-yellow-300 hover:border-purple-500"
@@ -206,19 +210,34 @@ const Landing = () => {
             {darkMode ? <FiSun size={15} /> : <FiMoon size={15} />}
           </button>
 
-          <button className="hidden h-9 border-2 border-purple-500 px-5 font-mono text-[10px] font-bold uppercase tracking-widest text-purple-400 transition hover:bg-purple-500 hover:text-white sm:block">
+          {/* LOGIN BUTTON */}
+
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="hidden h-9 border-2 border-purple-500 px-5 font-mono text-[10px] font-bold uppercase tracking-widest text-purple-400 transition hover:bg-purple-500 hover:text-white sm:block"
+          >
             Sign In
+          </button>
+
+          {/* REGISTER BUTTON */}
+
+          <button
+            type="button"
+            onClick={() => navigate("/register")}
+            className="hidden h-9 border-2 border-purple-500 bg-purple-600 px-5 font-mono text-[10px] font-bold uppercase tracking-widest text-white transition hover:bg-purple-500 sm:block"
+          >
+            Register
           </button>
         </div>
       </header>
 
-      {/* =====================================================
-          HERO
-      ====================================================== */}
+      {/* ================= HERO ================= */}
 
       <section className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-14 pt-12 sm:px-8 sm:pt-16 lg:pb-16 lg:pt-20">
         <div className="max-w-4xl">
           {/* Status */}
+
           <div className="mb-5 flex items-center gap-3">
             <div
               className={`flex items-center gap-2 border px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] ${
@@ -233,6 +252,7 @@ const Landing = () => {
           </div>
 
           {/* Heading */}
+
           <h1 className="max-w-5xl font-mono text-5xl font-black uppercase leading-[0.9] tracking-tight sm:text-6xl lg:text-8xl">
             Prepare
             <br />
@@ -242,6 +262,7 @@ const Landing = () => {
           </h1>
 
           {/* Description */}
+
           <p
             className={`mt-5 max-w-2xl font-mono text-sm leading-6 sm:text-base ${
               darkMode ? "text-white/40" : "text-black/55"
@@ -253,8 +274,13 @@ const Landing = () => {
           </p>
 
           {/* Buttons */}
+
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-            <button className="group flex h-12 items-center justify-center gap-3 border-2 border-purple-400 bg-purple-600 px-7 py-2.5 font-mono text-xs font-black uppercase tracking-widest text-white shadow-[5px_5px_0px_#312e81] transition-all hover:bg-purple-500 hover:shadow-[3px_3px_0px_#312e81] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none">
+            <button
+              type="button"
+              onClick={() => navigate("/login")}
+              className="group flex h-12 items-center justify-center gap-3 border-2 border-purple-400 bg-purple-600 px-7 py-2.5 font-mono text-xs font-black uppercase tracking-widest text-white shadow-[5px_5px_0px_#312e81] transition-all hover:bg-purple-500 hover:shadow-[3px_3px_0px_#312e81] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+            >
               Start Interview
               <FiArrowRight
                 size={17}
@@ -275,12 +301,11 @@ const Landing = () => {
           </div>
         </div>
 
-        {/* =====================================================
-            HERO TERMINAL
-        ====================================================== */}
+        {/* ================= HERO TERMINAL ================= */}
 
         <div className="mt-12 grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
           {/* Interview Terminal */}
+
           <div
             className={`min-w-0 overflow-hidden border-2 p-5 sm:p-6 ${
               darkMode
@@ -304,7 +329,6 @@ const Landing = () => {
             </div>
 
             <div className="space-y-4 font-mono text-sm">
-              {/* Agent */}
               <div>
                 <p className="text-purple-400">agent.prompt</p>
 
@@ -317,7 +341,6 @@ const Landing = () => {
                 </p>
               </div>
 
-              {/* Candidate */}
               <div>
                 <p className="text-blue-400">candidate.response</p>
 
@@ -330,7 +353,6 @@ const Landing = () => {
                 </p>
               </div>
 
-              {/* AI Feedback */}
               <div className="border-l-2 border-purple-500 pl-4">
                 <p className="text-green-400">ai.feedback</p>
 
@@ -347,6 +369,7 @@ const Landing = () => {
           </div>
 
           {/* Score */}
+
           <div
             className={`min-w-0 border-2 p-5 ${
               darkMode
@@ -402,9 +425,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* =====================================================
-          STATS
-      ====================================================== */}
+      {/* ================= STATS ================= */}
 
       <section
         className={`relative z-10 w-full border-y ${
@@ -433,9 +454,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* =====================================================
-          FEATURES
-      ====================================================== */}
+      {/* ================= FEATURES ================= */}
 
       <section
         id="features"
@@ -499,9 +518,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* =====================================================
-          HOW IT WORKS
-      ====================================================== */}
+      {/* ================= HOW IT WORKS ================= */}
 
       <section
         id="how-it-works"
@@ -546,9 +563,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* =====================================================
-          CTA
-      ====================================================== */}
+      {/* ================= CTA ================= */}
 
       <section
         id="about"
@@ -580,7 +595,11 @@ const Landing = () => {
             weaknesses, and walk into your next interview with confidence.
           </p>
 
-          <button className="group mx-auto mt-7 flex h-12 items-center gap-3 border-2 border-purple-400 bg-purple-600 px-8 py-2.5 font-mono text-xs font-black uppercase tracking-widest text-white shadow-[5px_5px_0px_#312e81] transition hover:bg-purple-500 hover:shadow-[3px_3px_0px_#312e81]">
+          <button
+            type="button"
+            onClick={() => navigate("/register")}
+            className="group mx-auto mt-7 flex h-12 items-center gap-3 border-2 border-purple-400 bg-purple-600 px-8 py-2.5 font-mono text-xs font-black uppercase tracking-widest text-white shadow-[5px_5px_0px_#312e81] transition hover:bg-purple-500 hover:shadow-[3px_3px_0px_#312e81]"
+          >
             Start Preparing
             <FiArrowRight
               size={17}
@@ -590,9 +609,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* =====================================================
-          FOOTER
-      ====================================================== */}
+      {/* ================= FOOTER ================= */}
 
       <footer
         className={`relative z-10 w-full border-t ${
