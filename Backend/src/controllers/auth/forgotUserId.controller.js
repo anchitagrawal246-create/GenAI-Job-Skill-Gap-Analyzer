@@ -1,6 +1,6 @@
-const UserModel = require("../model/user.model");
+const UserModel = require("../../model/user.model");
 
-const { generateOTP, hashOTP } = require("../utils/otp.utils");
+const { generateOTP, hashOTP } = require("");
 
 const {
   createOTP,
@@ -8,9 +8,9 @@ const {
   deleteOTP,
   isResendAllowed,
   setResendCooldown,
-} = require("../services/recovery.service");
+} = require("../../services/recovery.service");
 
-const { sendOTPEmail } = require("../services/email.service");
+const { sendOTPEmail } = require("../../services/email.service");
 
 /**
  * @name ForgotUserIdController

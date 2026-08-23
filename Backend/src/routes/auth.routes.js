@@ -1,75 +1,129 @@
 const { Router } = require("express");
 
-const authController = require("../controllers/auth.controller");
-const authMiddleware = require("../middleware/auth.middleware");
+// =========================================================
+// AUTH ROUTE HUB
+// =========================================================
+//
+// File:
+// routes/auth.routes.js
+//
+// Purpose:
+// Central router for all authentication-related routes.
+//
+// Base URL:
+// /api/auth
+//
+// This file DOES NOT contain individual route definitions.
+//
+// Instead, it imports smaller route modules:
+//
+// register.routes.js
+// login.routes.js
+// session.routes.js
+// recovery.routes.js
+//
+// Workflow:
+//
+// Client
+//   ↓
+// /api/auth
+//   ↓
+// auth.routes.js
+//   ↓
+// ┌─────────────────────────────┐
+// │ register.routes.js          │
+// │ login.routes.js             │
+// │ session.routes.js           │
+// │ recovery.routes.js          │
+// └─────────────────────────────┘
+//
+// Why split the routes?
+//
+// Keeping every authentication route in one file makes the
+// file difficult to maintain.
+//
+// Each route group is therefore placed in its own module.
+//
+// =========================================================
 
-const {
-  CheckUsernameController,
-} = require("../controllers/checkUsername.controller");
+// =========================================================
+// REGISTER ROUTES
+// =========================================================
+//
+// Handles:
+//
+// POST /register
+// GET  /check-username
+// GET  /check-email
+// POST /verify-registration
+//
+// =========================================================
 
-const {
-  ForgotUserIdController,
-  VerifyUserIdController,
-} = require("../controllers/forgotUserId.controller");
+const registerRoutes = require("./auth/register.routes");
 
-const {
-  VerifyRegistrationController,
-} = require("../controllers/verifyRegistration.controller");
+// =========================================================
+// LOGIN ROUTES
+// =========================================================
+//
+// Handles:
+//
+// POST /login
+// POST /refresh
+//
+// =========================================================
 
-const {
-  ForgotPasswordController,
-  VerifyPasswordOTPController,
-  ResetPasswordController,
-} = require("../controllers/forgotPassword.controller");
+const loginRoutes = require("./auth/login.routes");
+
+// =========================================================
+// SESSION ROUTES
+// =========================================================
+//
+// Handles:
+//
+// POST /logout
+// POST /logout-all
+// GET  /getme
+//
+// =========================================================
+
+const sessionRoutes = require("./auth/session.routes");
+
+// =========================================================
+// RECOVERY ROUTES
+// =========================================================
+//
+// Handles:
+//
+// POST /forgot-user-id
+// POST /verify-user-id
+// POST /forgot-password
+// POST /verify-password-otp
+// POST /reset-password
+//
+// =========================================================
+
+const recoveryRoutes = require("./auth/recovery.routes");
+
+// =========================================================
+// CREATE AUTH ROUTER
+// =========================================================
 
 const authRouter = Router();
 
-// ==========================================
-// REGISTER
-// ==========================================
+// =========================================================
+// MOUNT ROUTE MODULES
+// =========================================================
 
-authRouter.post("/register", authController.RegisterUserController);
+authRouter.use(registerRoutes);
 
-authRouter.get("/check-username", CheckUsernameController);
+authRouter.use(loginRoutes);
 
-authRouter.get("/check-email", authController.CheckEmailController);
+authRouter.use(sessionRoutes);
 
-authRouter.post("/verify-registration", VerifyRegistrationController);
+authRouter.use(recoveryRoutes);
 
-// ==========================================
-// LOGIN
-// ==========================================
-
-authRouter.post("/login", authController.LoginUserController);
-
-// ==========================================
-// LOGOUT
-// ==========================================
-
-authRouter.post("/logout", authMiddleware, authController.LogoutUserController);
-
-// ==========================================
-// GET CURRENT USER
-// ==========================================
-
-authRouter.get("/getme", authMiddleware, authController.GetMeUserController);
-
-// ==========================================
-// FORGOT USER ID
-// ==========================================
-
-authRouter.post("/forgot-user-id", ForgotUserIdController);
-
-authRouter.post("/verify-user-id", VerifyUserIdController);
-
-// ==========================================
-// FORGOT PASSWORD
-// ==========================================
-
-authRouter.post("/forgot-password", ForgotPasswordController);
-
-authRouter.post("/verify-password-otp", VerifyPasswordOTPController);
-
-authRouter.post("/reset-password", ResetPasswordController);
+// =========================================================
+// EXPORT
+// =========================================================
 
 module.exports = authRouter;
