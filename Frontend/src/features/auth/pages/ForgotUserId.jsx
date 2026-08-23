@@ -1,0 +1,828 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useTheme } from "../../../context/theme.context";
+
+import {
+  FiArrowLeft,
+  FiArrowRight,
+  FiCpu,
+  FiMail,
+  FiSun,
+  FiMoon,
+  FiShield,
+  FiHome,
+  FiAlertCircle,
+  FiUser,
+  FiCheck,
+} from "react-icons/fi";
+
+import { forgotUserId, verifyUserIdOTP } from "../../../api/auth.api";
+
+import OTPModal from "../components/OTPModal";
+
+const ForgotUserId = () => {
+  const navigate = useNavigate();
+  const { darkMode, toggleTheme } = useTheme();
+
+  // =====================================================
+  // STATE
+  // =====================================================
+
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const [error, setError] = useState("");
+
+  // OTP MODAL
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
+
+  // RECOVERED USER ID
+  const [userId, setUserId] = useState("");
+  const [showUserId, setShowUserId] = useState(false);
+
+  // =====================================================
+  // HANDLE INPUT CHANGE
+  // =====================================================
+
+  const handleChange = (e) => {
+    setEmail(e.target.value);
+
+    if (error) {
+      setError("");
+    }
+
+    if (otpError) {
+      setOtpError("");
+    }
+  };
+
+  // =====================================================
+  // EMAIL VALIDATION
+  // =====================================================
+
+  const isValidEmail = (value) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  };
+
+  // =====================================================
+  // SEND OTP
+  // =====================================================
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    setError("");
+    setOtpError("");
+    setShowUserId(false);
+    setUserId("");
+
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail) {
+      setError("Email address is required.");
+      return;
+    }
+
+    if (!isValidEmail(trimmedEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      console.log("Sending forgot User ID OTP:", {
+        email: trimmedEmail,
+      });
+
+      const data = await forgotUserId({
+        email: trimmedEmail,
+      });
+
+      console.log("Forgot User ID response:", data);
+
+      const responseEmail = data?.email || data?.data?.email || trimmedEmail;
+
+      setOtpEmail(responseEmail);
+      setOtpError("");
+
+      // Open OTP modal
+      setShowOTPModal(true);
+    } catch (err) {
+      console.error("Forgot User ID error:", err);
+
+      const backendMessage =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message;
+
+      setError(
+        backendMessage || "Unable to process your request. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // =====================================================
+  // VERIFY OTP
+  // =====================================================
+
+  const handleVerifyOTP = async (otp) => {
+    try {
+      setOtpLoading(true);
+      setOtpError("");
+
+      const trimmedEmail = email.trim().toLowerCase();
+
+      console.log("Verifying User ID OTP:", {
+        email: trimmedEmail,
+        otp,
+      });
+
+      const data = await verifyUserIdOTP({
+        email: trimmedEmail,
+        otp,
+      });
+
+      console.log("Verify User ID OTP response:", data);
+
+      /*
+       * Backend may return User ID in different places.
+       */
+
+      const recoveredUserId =
+        data?.userId ||
+        data?.username ||
+        data?.user?.userId ||
+        data?.user?.username ||
+        data?.data?.userId ||
+        data?.data?.username ||
+        "";
+
+      if (!recoveredUserId) {
+        throw new Error("User ID could not be retrieved. Please try again.");
+      }
+
+      setUserId(recoveredUserId);
+      setShowOTPModal(false);
+      setShowUserId(true);
+    } catch (err) {
+      console.error("Verify User ID OTP error:", err);
+
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Invalid or expired OTP.";
+
+      setOtpError(message);
+
+      throw err;
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // =====================================================
+  // RESEND OTP
+  // =====================================================
+
+  const handleResendOTP = async () => {
+    try {
+      setOtpError("");
+
+      const trimmedEmail = email.trim().toLowerCase();
+
+      if (!trimmedEmail) {
+        throw new Error("Email address is required.");
+      }
+
+      console.log("Resending User ID OTP:", {
+        email: trimmedEmail,
+      });
+
+      const data = await forgotUserId({
+        email: trimmedEmail,
+      });
+
+      console.log("Resend User ID OTP response:", data);
+
+      return data;
+    } catch (err) {
+      console.error("Resend User ID OTP error:", err);
+
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Unable to resend OTP.";
+
+      setOtpError(message);
+
+      throw err;
+    }
+  };
+
+  // =====================================================
+  // GO HOME
+  // =====================================================
+
+  const handleHome = () => {
+    navigate("/");
+  };
+
+  // =====================================================
+  // GO LOGIN
+  // =====================================================
+
+  const handleLogin = () => {
+    navigate("/login");
+  };
+
+  // =====================================================
+  // UI
+  // =====================================================
+
+  return (
+    <main
+      className={`min-h-screen w-full overflow-hidden transition-colors duration-500 ${
+        darkMode ? "bg-[#08070b] text-[#f4f0df]" : "bg-[#eee9dc] text-[#17131f]"
+      }`}
+    >
+      {/* =====================================================
+          BACKGROUND
+      ===================================================== */}
+
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        {/* Purple glow */}
+
+        <div
+          className={`absolute -left-52 -top-52 h-[500px] w-[500px] rounded-full blur-[150px] ${
+            darkMode ? "bg-purple-700/15" : "bg-purple-400/15"
+          }`}
+        />
+
+        {/* Indigo glow */}
+
+        <div
+          className={`absolute -right-52 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] ${
+            darkMode ? "bg-indigo-700/10" : "bg-indigo-400/10"
+          }`}
+        />
+
+        {/* Fuchsia glow */}
+
+        <div
+          className={`absolute bottom-[-200px] left-1/3 h-[450px] w-[450px] rounded-full blur-[150px] ${
+            darkMode ? "bg-fuchsia-700/10" : "bg-fuchsia-400/10"
+          }`}
+        />
+
+        {/* Grid */}
+
+        <div
+          className={`absolute inset-0 ${
+            darkMode ? "opacity-[0.035]" : "opacity-[0.045]"
+          }`}
+          style={{
+            backgroundImage: `
+              linear-gradient(
+                #8b5cf6 1px,
+                transparent 1px
+              ),
+              linear-gradient(
+                90deg,
+                #8b5cf6 1px,
+                transparent 1px
+              )
+            `,
+            backgroundSize: "55px 55px",
+          }}
+        />
+      </div>
+
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
+
+      <header
+        className={`relative z-30 mx-auto flex h-16 max-w-[1600px] items-center justify-between border-b px-5 sm:px-8 lg:px-14 xl:px-20 ${
+          darkMode ? "border-purple-500/10" : "border-purple-900/10"
+        }`}
+      >
+        {/* LOGO */}
+
+        <button
+          type="button"
+          onClick={handleHome}
+          title="Go to home"
+          aria-label="Go to home"
+          className="group flex items-center gap-3 text-left"
+        >
+          <div
+            className="
+              flex h-9 w-9
+              items-center justify-center
+              border-2 border-purple-500
+              bg-purple-600
+              shadow-[3px_3px_0px_#312e81]
+              transition-all duration-300
+              group-hover:-translate-y-0.5
+              group-hover:bg-purple-500
+              group-hover:shadow-[2px_2px_0px_#312e81]
+            "
+          >
+            <FiCpu size={17} />
+          </div>
+
+          <div>
+            <p
+              className="
+                font-mono text-xs font-black
+                tracking-[0.18em]
+                transition-colors
+                group-hover:text-purple-400
+              "
+            >
+              AI INTERVIEW
+            </p>
+
+            <p
+              className={`font-mono text-[8px] tracking-[0.25em] ${
+                darkMode ? "text-white/30" : "text-black/40"
+              }`}
+            >
+              CANDIDATE PORTAL
+            </p>
+          </div>
+        </button>
+
+        {/* HEADER ACTIONS */}
+
+        <div className="flex items-center gap-2">
+          {/* HOME */}
+
+          <button
+            type="button"
+            onClick={handleHome}
+            title="Home"
+            aria-label="Home"
+            className={`flex h-9 items-center gap-2 border px-3 font-mono text-[8px] font-bold uppercase tracking-wider transition-all duration-300 ${
+              darkMode
+                ? "border-[#302c38] bg-[#15131a] text-white/60 hover:border-purple-500 hover:bg-purple-500/10 hover:text-purple-300"
+                : "border-black/15 bg-white/70 text-black/60 hover:border-purple-500 hover:bg-purple-500/5 hover:text-purple-700"
+            }`}
+          >
+            <FiHome size={14} />
+
+            <span className="hidden sm:inline">Home</span>
+          </button>
+
+          {/* THEME */}
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title="Toggle theme"
+            aria-label="Toggle theme"
+            className={`flex h-9 w-9 items-center justify-center border transition-all duration-300 ${
+              darkMode
+                ? "border-[#302c38] bg-[#15131a] text-yellow-300 hover:border-purple-500 hover:bg-purple-500/10"
+                : "border-black/15 bg-white/70 text-purple-700 hover:border-purple-500"
+            }`}
+          >
+            {darkMode ? <FiSun size={16} /> : <FiMoon size={16} />}
+          </button>
+        </div>
+      </header>
+
+      {/* =====================================================
+          MAIN
+      ===================================================== */}
+
+      <div className="relative z-10 flex min-h-[calc(100vh-4rem)] items-center justify-center px-6 py-8">
+        <div className="w-full max-w-[430px]">
+          {/* CARD */}
+
+          <div
+            className={`border-2 transition-colors duration-500 ${
+              darkMode
+                ? "border-[#2b2735] bg-[#111014] shadow-[6px_6px_0px_#5b21b6]"
+                : "border-black/15 bg-[#f8f5ec] shadow-[6px_6px_0px_#6d28d9]"
+            }`}
+          >
+            {/* CARD HEADER */}
+
+            <div
+              className={`flex items-center justify-between border-b-2 px-5 py-2.5 ${
+                darkMode
+                  ? "border-[#2b2735] bg-[#17151c]"
+                  : "border-black/10 bg-[#e9e4d8]"
+              }`}
+            >
+              <span className="font-mono text-[8px] tracking-[0.2em] text-purple-400">
+                USER ID RECOVERY
+              </span>
+
+              <span
+                className={`font-mono text-[7px] tracking-widest ${
+                  darkMode ? "text-white/25" : "text-black/30"
+                }`}
+              >
+                ACCOUNT ACCESS
+              </span>
+            </div>
+
+            {/* BODY */}
+
+            <div className="p-5 sm:p-6">
+              {/* BACK TO LOGIN */}
+
+              <button
+                type="button"
+                onClick={handleLogin}
+                className="
+                  mb-5 flex items-center gap-2
+                  font-mono text-[9px] font-bold
+                  uppercase tracking-wider
+                  text-purple-500
+                  transition
+                  hover:text-purple-400
+                "
+              >
+                <FiArrowLeft size={13} />
+                Back to login
+              </button>
+
+              {/* =====================================================
+                  RECOVERED USER ID
+              ===================================================== */}
+
+              {showUserId ? (
+                <>
+                  <div className="mb-5">
+                    <div className="mb-3 flex items-center gap-3">
+                      <div
+                        className="
+                          flex h-9 w-9
+                          items-center justify-center
+                          border-2 border-green-500
+                          bg-green-600
+                          shadow-[3px_3px_0px_#14532d]
+                        "
+                      >
+                        <FiCheck size={17} />
+                      </div>
+
+                      <div>
+                        <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-green-400">
+                          Recovery Complete
+                        </p>
+
+                        <p
+                          className={`font-mono text-[7px] ${
+                            darkMode ? "text-white/25" : "text-black/35"
+                          }`}
+                        >
+                          USER ID FOUND
+                        </p>
+                      </div>
+                    </div>
+
+                    <h1 className="font-mono text-xl font-black uppercase">
+                      Your <span className="text-purple-500">User ID</span>
+                    </h1>
+
+                    <p
+                      className={`mt-2 font-mono text-[9px] leading-4 ${
+                        darkMode ? "text-white/35" : "text-black/45"
+                      }`}
+                    >
+                      Your User ID has been successfully verified.
+                    </p>
+                  </div>
+
+                  {/* USER ID BOX */}
+
+                  <div
+                    className={`mb-5 border-2 p-4 ${
+                      darkMode
+                        ? "border-purple-500/40 bg-purple-500/5"
+                        : "border-purple-500/30 bg-purple-50"
+                    }`}
+                  >
+                    <div className="mb-2 flex items-center gap-2">
+                      <FiUser size={14} className="text-purple-400" />
+
+                      <span className="font-mono text-[8px] font-bold uppercase tracking-widest text-purple-400">
+                        Your User ID
+                      </span>
+                    </div>
+
+                    <p
+                      className={`break-all font-mono text-lg font-black ${
+                        darkMode ? "text-white" : "text-black"
+                      }`}
+                    >
+                      {userId}
+                    </p>
+                  </div>
+
+                  {/* LOGIN BUTTON */}
+
+                  <button
+                    type="button"
+                    onClick={handleLogin}
+                    className="
+                      group flex min-h-10 w-full
+                      items-center justify-center gap-3
+                      border-2 border-purple-400
+                      bg-purple-600 py-2
+                      font-mono text-[10px]
+                      font-black uppercase
+                      tracking-widest text-white
+                      shadow-[3px_3px_0px_#312e81]
+                      transition-all
+                      hover:bg-purple-500
+                      hover:shadow-[2px_2px_0px_#312e81]
+                      active:translate-x-[2px]
+                      active:translate-y-[2px]
+                      active:shadow-none
+                    "
+                  >
+                    Continue to Sign In
+                    <FiArrowRight
+                      size={15}
+                      className="transition-transform group-hover:translate-x-1"
+                    />
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* =====================================================
+                      HEADING
+                  ===================================================== */}
+
+                  <div className="mb-5">
+                    <div className="mb-3 flex items-center gap-3">
+                      <div
+                        className="
+                          flex h-9 w-9
+                          items-center justify-center
+                          border-2 border-purple-500
+                          bg-purple-600
+                          shadow-[3px_3px_0px_#312e81]
+                        "
+                      >
+                        <FiUser size={16} />
+                      </div>
+
+                      <div>
+                        <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-purple-400">
+                          Account Recovery
+                        </p>
+
+                        <p
+                          className={`font-mono text-[7px] ${
+                            darkMode ? "text-white/25" : "text-black/35"
+                          }`}
+                        >
+                          RECOVER YOUR USER ID
+                        </p>
+                      </div>
+                    </div>
+
+                    <h1 className="font-mono text-xl font-black uppercase">
+                      Forgot <span className="text-purple-500">User ID?</span>
+                    </h1>
+
+                    <p
+                      className={`mt-2 font-mono text-[9px] leading-4 ${
+                        darkMode ? "text-white/35" : "text-black/45"
+                      }`}
+                    >
+                      Enter your registered email address and we'll send a
+                      secure OTP to verify your identity.
+                    </p>
+                  </div>
+
+                  {/* ERROR */}
+
+                  {error && (
+                    <div
+                      className={`mb-4 flex items-center gap-2 border-2 px-3 py-2 font-mono text-[9px] ${
+                        darkMode
+                          ? "border-red-500/40 bg-red-500/10 text-red-300"
+                          : "border-red-500/30 bg-red-50 text-red-600"
+                      }`}
+                    >
+                      <FiAlertCircle size={14} />
+
+                      <span>{error}</span>
+                    </div>
+                  )}
+
+                  {/* =====================================================
+                      FORM
+                  ===================================================== */}
+
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* EMAIL */}
+
+                    <div>
+                      <label className="mb-1.5 block font-mono text-[8px] font-bold uppercase tracking-widest opacity-60">
+                        Registered Email
+                      </label>
+
+                      <div
+                        className={`flex h-10 border-2 transition focus-within:border-purple-500 ${
+                          darkMode
+                            ? "border-[#302c38] bg-[#0b0a0e]"
+                            : "border-black/15 bg-white"
+                        }`}
+                      >
+                        <div className="flex w-10 shrink-0 items-center justify-center border-r-2 border-inherit text-purple-400">
+                          <FiMail size={14} />
+                        </div>
+
+                        <input
+                          name="email"
+                          value={email}
+                          onChange={handleChange}
+                          type="email"
+                          placeholder="enter your registered email"
+                          autoComplete="email"
+                          disabled={loading}
+                          required
+                          className={`min-w-0 flex-1 bg-transparent px-3 font-mono text-xs outline-none disabled:cursor-not-allowed ${
+                            darkMode
+                              ? "text-white placeholder:text-white/20"
+                              : "text-black placeholder:text-black/25"
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* SEND OTP */}
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="
+                        group flex min-h-10 w-full
+                        items-center justify-center gap-3
+                        border-2 border-purple-400
+                        bg-purple-600 py-2
+                        font-mono text-[10px]
+                        font-black uppercase
+                        tracking-widest text-white
+                        shadow-[3px_3px_0px_#312e81]
+                        transition-all
+                        hover:bg-purple-500
+                        hover:shadow-[2px_2px_0px_#312e81]
+                        active:translate-x-[2px]
+                        active:translate-y-[2px]
+                        active:shadow-none
+                        disabled:cursor-not-allowed
+                        disabled:opacity-60
+                      "
+                    >
+                      {loading ? (
+                        <>
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          Send Verification OTP
+                          <FiArrowRight
+                            size={15}
+                            className="transition-transform group-hover:translate-x-1"
+                          />
+                        </>
+                      )}
+                    </button>
+                  </form>
+
+                  {/* PASSWORD RECOVERY */}
+
+                  <div
+                    className={`mt-5 border-t-2 pt-4 text-center ${
+                      darkMode ? "border-[#25222c]" : "border-black/10"
+                    }`}
+                  >
+                    <p
+                      className={`font-mono text-[9px] font-semibold uppercase tracking-wide ${
+                        darkMode ? "text-white/40" : "text-black/50"
+                      }`}
+                    >
+                      Remember your User ID?
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate("/forgot-password")}
+                      className="
+                        group mt-1.5 inline-flex
+                        items-center gap-2
+                        font-mono text-xs
+                        font-black uppercase
+                        tracking-wider
+                        text-purple-500
+                        transition
+                        hover:text-purple-400
+                      "
+                    >
+                      Forgot Password?
+                      <FiArrowRight
+                        size={14}
+                        className="transition-transform group-hover:translate-x-1"
+                      />
+                    </button>
+                  </div>
+
+                  {/* SIGN IN */}
+
+                  <div
+                    className={`mt-4 border-t-2 pt-4 text-center ${
+                      darkMode ? "border-[#25222c]" : "border-black/10"
+                    }`}
+                  >
+                    <p
+                      className={`font-mono text-[9px] font-semibold uppercase tracking-wide ${
+                        darkMode ? "text-white/40" : "text-black/50"
+                      }`}
+                    >
+                      Already have your User ID?
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={handleLogin}
+                      className="
+                        group mt-1.5 inline-flex
+                        items-center gap-2
+                        font-mono text-xs
+                        font-black uppercase
+                        tracking-wider
+                        text-purple-500
+                        transition
+                        hover:text-purple-400
+                      "
+                    >
+                      Sign In
+                      <FiArrowRight
+                        size={14}
+                        className="transition-transform group-hover:translate-x-1"
+                      />
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* SECURITY FOOTER */}
+
+              <div
+                className={`mt-4 border-t pt-2 text-center font-mono text-[7px] uppercase tracking-widest ${
+                  darkMode
+                    ? "border-[#25222c] text-white/20"
+                    : "border-black/10 text-black/30"
+                }`}
+              >
+                SECURE ACCOUNT RECOVERY
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* =====================================================
+          OTP MODAL
+      ===================================================== */}
+
+      <OTPModal
+        isOpen={showOTPModal}
+        email={otpEmail}
+        darkMode={darkMode}
+        loading={otpLoading}
+        error={otpError}
+        purpose="forgot-user-id"
+        resendCooldown={60}
+        onClose={() => {
+          if (!otpLoading) {
+            setShowOTPModal(false);
+            setOtpError("");
+          }
+        }}
+        onVerify={handleVerifyOTP}
+        onResend={handleResendOTP}
+      />
+    </main>
+  );
+};
+
+export default ForgotUserId;

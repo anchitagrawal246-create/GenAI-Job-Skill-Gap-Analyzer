@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   FiArrowLeft,
   FiArrowRight,
@@ -13,6 +13,7 @@ import {
   FiShield,
   FiSun,
   FiAlertCircle,
+  FiX,
 } from "react-icons/fi";
 
 import { useTheme } from "../../../context/theme.context";
@@ -21,7 +22,6 @@ import { resetPassword } from "../../../api/auth.api";
 const ResetPassword = () => {
   const navigate = useNavigate();
   const location = useLocation();
-
   const { darkMode, toggleTheme } = useTheme();
 
   // =====================================================
@@ -43,21 +43,37 @@ const ResetPassword = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
-
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   // =====================================================
   // PASSWORD VALIDATION
-  // Backend requires minimum 8 characters
+  // SAME RULES AS REGISTER
   // =====================================================
 
-  const passwordValid = password.length >= 8;
+  const passwordChecks = {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /[0-9]/.test(password),
+    special: /[^A-Za-z0-9]/.test(password),
+  };
+
+  const passwordStrength = Object.values(passwordChecks).filter(Boolean).length;
+
+  const isStrongPassword = passwordStrength === 5;
+
+  // =====================================================
+  // PASSWORD MATCHING
+  // =====================================================
 
   const passwordsMatch =
     password.length > 0 &&
     confirmPassword.length > 0 &&
     password === confirmPassword;
+
+  const passwordsDoNotMatch =
+    confirmPassword.length > 0 && password !== confirmPassword;
 
   // =====================================================
   // PASSWORD CHANGE
@@ -90,7 +106,7 @@ const ResetPassword = () => {
     setSuccess("");
 
     // ===================================================
-    // VALIDATION
+    // PASSWORD REQUIRED
     // ===================================================
 
     if (!password) {
@@ -98,23 +114,33 @@ const ResetPassword = () => {
       return;
     }
 
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    // ===================================================
+    // PASSWORD STRENGTH
+    // ===================================================
+
+    if (!isStrongPassword) {
+      setError(
+        "Password must contain at least 8 characters, uppercase, lowercase, number and special character.",
+      );
       return;
     }
+
+    // ===================================================
+    // CONFIRM PASSWORD
+    // ===================================================
 
     if (!confirmPassword) {
       setError("Please confirm your password.");
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (!passwordsMatch) {
       setError("Passwords do not match.");
       return;
     }
 
     // ===================================================
-    // RESET TOKEN CHECK
+    // RESET TOKEN
     // ===================================================
 
     if (!resetToken) {
@@ -123,16 +149,6 @@ const ResetPassword = () => {
       );
       return;
     }
-
-    // ===================================================
-    // API REQUEST
-    // IMPORTANT:
-    // Backend expects:
-    //
-    // resetToken
-    // newPassword
-    // confirmPassword
-    // ===================================================
 
     try {
       setLoading(true);
@@ -151,13 +167,13 @@ const ResetPassword = () => {
 
       console.log("Reset password response:", response);
 
-      // =================================================
-      // SUCCESS
-      // =================================================
-
       setSuccess(response?.message || "Password reset successfully.");
 
-      // Redirect after successful reset
+      // Clear password fields
+      setPassword("");
+      setConfirmPassword("");
+
+      // Redirect to login
       setTimeout(() => {
         navigate("/login", {
           replace: true,
@@ -186,6 +202,30 @@ const ResetPassword = () => {
   };
 
   // =====================================================
+  // STRENGTH BAR CLASS
+  // =====================================================
+
+  const getStrengthLabel = () => {
+    if (password.length === 0) {
+      return "";
+    }
+
+    if (passwordStrength <= 2) {
+      return "WEAK";
+    }
+
+    if (passwordStrength === 3) {
+      return "FAIR";
+    }
+
+    if (passwordStrength === 4) {
+      return "GOOD";
+    }
+
+    return "STRONG";
+  };
+
+  // =====================================================
   // UI
   // =====================================================
 
@@ -195,29 +235,33 @@ const ResetPassword = () => {
         darkMode ? "bg-[#08070b] text-[#f4f0df]" : "bg-[#eee9dc] text-[#17131f]"
       }`}
     >
-      {/* =================================================
+      {/* =====================================================
           BACKGROUND
-      ================================================= */}
+      ===================================================== */}
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        {/* Purple */}
         <div
           className={`absolute -left-52 -top-52 h-[500px] w-[500px] rounded-full blur-[150px] ${
             darkMode ? "bg-purple-700/15" : "bg-purple-400/15"
           }`}
         />
 
+        {/* Indigo */}
         <div
           className={`absolute -right-52 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] ${
             darkMode ? "bg-indigo-700/10" : "bg-indigo-400/10"
           }`}
         />
 
+        {/* Fuchsia */}
         <div
           className={`absolute bottom-[-200px] left-1/3 h-[450px] w-[450px] rounded-full blur-[150px] ${
             darkMode ? "bg-fuchsia-700/10" : "bg-fuchsia-400/10"
           }`}
         />
 
+        {/* Grid */}
         <div
           className={`absolute inset-0 ${
             darkMode ? "opacity-[0.035]" : "opacity-[0.045]"
@@ -232,9 +276,9 @@ const ResetPassword = () => {
         />
       </div>
 
-      {/* =================================================
+      {/* =====================================================
           HEADER
-      ================================================= */}
+      ===================================================== */}
 
       <header
         className={`relative z-30 mx-auto flex h-16 max-w-[1600px] items-center justify-between border-b px-5 sm:px-8 lg:px-14 xl:px-20 ${
@@ -247,10 +291,12 @@ const ResetPassword = () => {
           type="button"
           onClick={handleHome}
           className="group flex items-center gap-3 text-left"
+          aria-label="Go to home"
         >
           <div
             className="
-              flex h-9 w-9 items-center justify-center
+              flex h-9 w-9
+              items-center justify-center
               border-2 border-purple-500
               bg-purple-600
               shadow-[3px_3px_0px_#312e81]
@@ -286,6 +332,8 @@ const ResetPassword = () => {
         {/* ACTIONS */}
 
         <div className="flex items-center gap-2">
+          {/* HOME */}
+
           <button
             type="button"
             onClick={handleHome}
@@ -297,18 +345,20 @@ const ResetPassword = () => {
             }`}
           >
             <FiHome size={14} />
-
             <span className="hidden sm:inline">Home</span>
           </button>
+
+          {/* THEME */}
 
           <button
             type="button"
             onClick={toggleTheme}
             title="Toggle theme"
+            aria-label="Toggle theme"
             className={`flex h-9 w-9 items-center justify-center border ${
               darkMode
-                ? "border-[#302c38] bg-[#15131a] text-yellow-300"
-                : "border-black/15 bg-white/70 text-purple-700"
+                ? "border-[#302c38] bg-[#15131a] text-yellow-300 hover:border-purple-500"
+                : "border-black/15 bg-white/70 text-purple-700 hover:border-purple-500"
             }`}
           >
             {darkMode ? <FiSun size={16} /> : <FiMoon size={16} />}
@@ -316,12 +366,14 @@ const ResetPassword = () => {
         </div>
       </header>
 
-      {/* =================================================
+      {/* =====================================================
           MAIN
-      ================================================= */}
+      ===================================================== */}
 
       <div className="relative z-10 flex min-h-[calc(100vh-4rem)] items-center justify-center px-6 py-8">
-        <div className="w-full max-w-[430px]">
+        <div className="w-full max-w-[450px]">
+          {/* CARD */}
+
           <div
             className={`border-2 ${
               darkMode
@@ -403,7 +455,7 @@ const ResetPassword = () => {
                     darkMode ? "text-white/35" : "text-black/45"
                   }`}
                 >
-                  Create a new password for your account.
+                  Create a new secure password for your account.
                 </p>
               </div>
 
@@ -476,13 +528,13 @@ const ResetPassword = () => {
                   </label>
 
                   <div
-                    className={`flex h-11 border-2 focus-within:border-purple-500 ${
+                    className={`flex h-11 border-2 transition focus-within:border-purple-500 ${
                       darkMode
                         ? "border-[#302c38] bg-[#0b0a0e]"
                         : "border-black/15 bg-white"
                     }`}
                   >
-                    <div className="flex w-10 shrink-0 items-center justify-center border-r-2 text-purple-400">
+                    <div className="flex w-10 shrink-0 items-center justify-center border-r-2 border-inherit text-purple-400">
                       <FiLock size={14} />
                     </div>
 
@@ -490,7 +542,7 @@ const ResetPassword = () => {
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={handlePasswordChange}
-                      placeholder="enter new password"
+                      placeholder="Enter new password"
                       autoComplete="new-password"
                       disabled={loading}
                       className={`min-w-0 flex-1 bg-transparent px-3 font-mono text-xs outline-none ${
@@ -504,6 +556,9 @@ const ResetPassword = () => {
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
                       disabled={loading}
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
                       className="flex w-10 items-center justify-center text-purple-400"
                     >
                       {showPassword ? (
@@ -514,16 +569,85 @@ const ResetPassword = () => {
                     </button>
                   </div>
 
+                  {/* PASSWORD STRENGTH */}
+
                   {password.length > 0 && (
-                    <p
-                      className={`mt-1 font-mono text-[7px] ${
-                        passwordValid ? "text-green-400" : "text-red-400"
-                      }`}
-                    >
-                      {passwordValid
-                        ? "✓ Password length is valid"
-                        : "✕ Minimum 8 characters"}
-                    </p>
+                    <div className="mt-2">
+                      {/* Strength bars */}
+
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((level) => (
+                          <div
+                            key={level}
+                            className={`h-[4px] flex-1 transition-colors ${
+                              passwordStrength >= level
+                                ? "bg-purple-500"
+                                : darkMode
+                                  ? "bg-white/10"
+                                  : "bg-black/10"
+                            }`}
+                          />
+                        ))}
+                      </div>
+
+                      {/* Strength label */}
+
+                      <div className="mt-1 flex items-center justify-between">
+                        <span
+                          className={`font-mono text-[6px] font-bold ${
+                            isStrongPassword
+                              ? "text-green-400"
+                              : "text-yellow-400"
+                          }`}
+                        >
+                          PASSWORD STRENGTH
+                        </span>
+
+                        <span
+                          className={`font-mono text-[6px] font-bold ${
+                            isStrongPassword
+                              ? "text-green-400"
+                              : "text-purple-400"
+                          }`}
+                        >
+                          {getStrengthLabel()}
+                        </span>
+                      </div>
+
+                      {/* Requirements */}
+
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                        <PasswordRequirement
+                          valid={passwordChecks.length}
+                          text="8+ CHARACTERS"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.uppercase}
+                          text="UPPERCASE"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.lowercase}
+                          text="LOWERCASE"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.number}
+                          text="NUMBER"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.special}
+                          text="SPECIAL"
+                          darkMode={darkMode}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -537,13 +661,25 @@ const ResetPassword = () => {
                   </label>
 
                   <div
-                    className={`flex h-11 border-2 focus-within:border-purple-500 ${
-                      darkMode
-                        ? "border-[#302c38] bg-[#0b0a0e]"
-                        : "border-black/15 bg-white"
-                    }`}
+                    className={`flex h-11 border-2 transition focus-within:border-purple-500 ${
+                      passwordsDoNotMatch
+                        ? "border-red-500"
+                        : passwordsMatch
+                          ? "border-green-500"
+                          : darkMode
+                            ? "border-[#302c38]"
+                            : "border-black/15"
+                    } ${darkMode ? "bg-[#0b0a0e]" : "bg-white"}`}
                   >
-                    <div className="flex w-10 shrink-0 items-center justify-center border-r-2 text-purple-400">
+                    <div
+                      className={`flex w-10 shrink-0 items-center justify-center border-r-2 border-inherit ${
+                        passwordsDoNotMatch
+                          ? "text-red-400"
+                          : passwordsMatch
+                            ? "text-green-400"
+                            : "text-purple-400"
+                      }`}
+                    >
                       <FiLock size={14} />
                     </div>
 
@@ -551,7 +687,7 @@ const ResetPassword = () => {
                       type={showConfirmPassword ? "text" : "password"}
                       value={confirmPassword}
                       onChange={handleConfirmPasswordChange}
-                      placeholder="confirm new password"
+                      placeholder="Confirm new password"
                       autoComplete="new-password"
                       disabled={loading}
                       className={`min-w-0 flex-1 bg-transparent px-3 font-mono text-xs outline-none ${
@@ -565,7 +701,16 @@ const ResetPassword = () => {
                       type="button"
                       onClick={() => setShowConfirmPassword((prev) => !prev)}
                       disabled={loading}
-                      className="flex w-10 items-center justify-center text-purple-400"
+                      aria-label={
+                        showConfirmPassword ? "Hide password" : "Show password"
+                      }
+                      className={`flex w-10 items-center justify-center ${
+                        passwordsDoNotMatch
+                          ? "text-red-400"
+                          : passwordsMatch
+                            ? "text-green-400"
+                            : "text-purple-400"
+                      }`}
                     >
                       {showConfirmPassword ? (
                         <FiEyeOff size={15} />
@@ -575,18 +720,44 @@ const ResetPassword = () => {
                     </button>
                   </div>
 
+                  {/* MATCH STATUS */}
+
                   {confirmPassword.length > 0 && (
                     <p
-                      className={`mt-1 font-mono text-[7px] ${
+                      className={`mt-1 flex items-center gap-1 font-mono text-[7px] font-bold ${
                         passwordsMatch ? "text-green-400" : "text-red-400"
                       }`}
                     >
-                      {passwordsMatch
-                        ? "✓ Passwords match"
-                        : "✕ Passwords do not match"}
+                      {passwordsMatch ? (
+                        <>
+                          <FiCheck size={8} />
+                          PASSWORDS MATCH
+                        </>
+                      ) : (
+                        <>
+                          <FiX size={8} />
+                          PASSWORDS DO NOT MATCH
+                        </>
+                      )}
                     </p>
                   )}
                 </div>
+
+                {/* =================================================
+                    PASSWORD STATUS
+                ================================================= */}
+
+                {password.length > 0 && !isStrongPassword && (
+                  <div
+                    className={`border px-3 py-2 font-mono text-[7px] ${
+                      darkMode
+                        ? "border-yellow-500/20 bg-yellow-500/5 text-yellow-400"
+                        : "border-yellow-500/30 bg-yellow-50 text-yellow-600"
+                    }`}
+                  >
+                    Password must satisfy all five security requirements.
+                  </div>
+                )}
 
                 {/* =================================================
                     SUBMIT
@@ -595,10 +766,16 @@ const ResetPassword = () => {
                 <button
                   type="submit"
                   disabled={
-                    loading || !passwordValid || !passwordsMatch || !resetToken
+                    loading ||
+                    !isStrongPassword ||
+                    !passwordsMatch ||
+                    !resetToken
                   }
                   className={`group flex min-h-11 w-full items-center justify-center gap-3 border-2 border-purple-400 bg-purple-600 py-2 font-mono text-[10px] font-black uppercase tracking-widest text-white shadow-[3px_3px_0px_#312e81] transition ${
-                    loading || !passwordValid || !passwordsMatch || !resetToken
+                    loading ||
+                    !isStrongPassword ||
+                    !passwordsMatch ||
+                    !resetToken
                       ? "cursor-not-allowed opacity-50"
                       : "hover:bg-purple-500 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
                   }`}
@@ -665,6 +842,24 @@ const ResetPassword = () => {
         </div>
       </div>
     </main>
+  );
+};
+
+// =====================================================
+// PASSWORD REQUIREMENT
+// =====================================================
+
+const PasswordRequirement = ({ valid, text, darkMode }) => {
+  return (
+    <div
+      className={`flex items-center gap-1 font-mono text-[6px] font-bold ${
+        valid ? "text-green-400" : darkMode ? "text-white/25" : "text-black/35"
+      }`}
+    >
+      {valid ? <FiCheck size={8} /> : <FiX size={8} />}
+
+      {text}
+    </div>
   );
 };
 

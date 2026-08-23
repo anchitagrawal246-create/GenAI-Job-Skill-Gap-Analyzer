@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowRight, FiCheck, FiCpu, FiHome, FiShield } from "react-icons/fi";
 import { useTheme } from "../../../context/theme.context";
@@ -10,11 +10,7 @@ const Successfull = () => {
 
   const username = location.state?.username || "";
 
-  useEffect(() => {
-    if (!location.state?.type) {
-      navigate("/register", { replace: true });
-    }
-  }, [location.state, navigate]);
+  
 
   const handleLogin = () => {
     navigate("/login");

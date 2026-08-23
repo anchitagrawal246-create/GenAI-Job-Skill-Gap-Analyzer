@@ -1,11 +1,7 @@
-
 const UserModel = require("../model/user.model");
 const bcrypt = require("bcryptjs");
 
-const {
-  generateOTP,
-  hashOTP,
-} = require("../utils/otp.utils");
+const { generateOTP, hashOTP } = require("../utils/otp.utils");
 
 const {
   createOTP,
@@ -20,6 +16,58 @@ const {
 
 const { sendOTPEmail } = require("../services/email.service");
 
+// =====================================================
+// MASK EMAIL
+// =====================================================
+
+/**
+ * Mask email address.
+ *
+ * Example:
+ * anchit@gmail.com
+ * -> a*****t@gmail.com
+ *
+ * abc@gmail.com
+ * -> a*c@gmail.com
+ *
+ * a@gmail.com
+ * -> *@gmail.com
+ */
+const maskEmail = (email) => {
+  if (!email || typeof email !== "string") {
+    return "";
+  }
+
+  const [localPart, domain] = email.split("@");
+
+  if (!localPart || !domain) {
+    return "";
+  }
+
+  if (localPart.length === 1) {
+    return `*@${domain}`;
+  }
+
+  if (localPart.length === 2) {
+    return `${localPart[0]}*@${domain}`;
+  }
+
+  if (localPart.length === 3) {
+    return `${localPart[0]}*${localPart[localPart.length - 1]}@${domain}`;
+  }
+
+  const firstCharacter = localPart[0];
+  const lastCharacter = localPart[localPart.length - 1];
+
+  const maskedMiddle = "*".repeat(Math.max(localPart.length - 2, 3));
+
+  return `${firstCharacter}${maskedMiddle}${lastCharacter}@${domain}`;
+};
+
+// =====================================================
+// FORGOT PASSWORD
+// =====================================================
+
 /**
  * @name ForgotPasswordController
  * @route POST /api/auth/forgot-password
@@ -32,7 +80,10 @@ async function ForgotPasswordController(req, res) {
   try {
     const { username } = req.body || {};
 
-    // Validate username
+    // --------------------------------------------------
+    // VALIDATE USERNAME
+    // --------------------------------------------------
+
     if (!username) {
       return res.status(400).json({
         success: false,
@@ -49,14 +100,18 @@ async function ForgotPasswordController(req, res) {
       });
     }
 
-    // Find user
+    // --------------------------------------------------
+    // FIND USER
+    // --------------------------------------------------
+
     const user = await UserModel.findOne({
       username: normalizedUsername,
     });
 
-    /*
-     * Do not reveal whether the username exists.
-     */
+    // --------------------------------------------------
+    // DO NOT REVEAL USER EXISTENCE
+    // --------------------------------------------------
+
     if (!user) {
       return res.status(200).json({
         success: true,
@@ -64,13 +119,22 @@ async function ForgotPasswordController(req, res) {
       });
     }
 
-    /*
-     * MongoDB automatically generated _id.
-     * We use it as the Redis user identifier.
-     */
+    // --------------------------------------------------
+    // USER ID
+    // --------------------------------------------------
+
     const userId = user._id.toString();
 
-    // Check 60-second resend cooldown
+    // --------------------------------------------------
+    // MASK EMAIL
+    // --------------------------------------------------
+
+    const maskedEmail = maskEmail(user.email);
+
+    // --------------------------------------------------
+    // CHECK RESEND COOLDOWN
+    // --------------------------------------------------
+
     const allowed = await isResendAllowed({
       userId,
       purpose: "FORGOT_PASSWORD",
@@ -80,24 +144,27 @@ async function ForgotPasswordController(req, res) {
       return res.status(429).json({
         success: false,
         message: "Please wait 60 seconds before requesting another OTP",
+        remainingSeconds: 60,
+        maskedEmail,
       });
     }
 
-    // Generate new OTP
+    // --------------------------------------------------
+    // GENERATE OTP
+    // --------------------------------------------------
+
     const otp = generateOTP();
 
-    // Hash OTP before storing in Redis
+    // --------------------------------------------------
+    // HASH OTP
+    // --------------------------------------------------
+
     const otpHash = hashOTP(otp);
 
-    /*
-     * createOTP() uses the same Redis key for this user.
-     *
-     * Therefore, if an old OTP exists, this SET operation
-     * automatically replaces it with the new OTP.
-     *
-     * OLD OTP = INVALID
-     * NEW OTP = VALID
-     */
+    // --------------------------------------------------
+    // SAVE OTP
+    // --------------------------------------------------
+
     await createOTP({
       userId,
       purpose: "FORGOT_PASSWORD",
@@ -105,22 +172,34 @@ async function ForgotPasswordController(req, res) {
       otpHash,
     });
 
-    // Start 60-second resend cooldown
+    // --------------------------------------------------
+    // START RESEND COOLDOWN
+    // --------------------------------------------------
+
     await setResendCooldown({
       userId,
       purpose: "FORGOT_PASSWORD",
     });
 
-    // Send OTP
+    // --------------------------------------------------
+    // SEND EMAIL
+    // --------------------------------------------------
+
     await sendOTPEmail({
       email: user.email,
       otp,
       purpose: "FORGOT_PASSWORD",
     });
 
+    // --------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------
+
     return res.status(200).json({
       success: true,
       message: "OTP sent to your registered email",
+      maskedEmail,
+      remainingSeconds: 60,
     });
   } catch (error) {
     console.error("Forgot Password Error:", error);
@@ -132,20 +211,26 @@ async function ForgotPasswordController(req, res) {
   }
 }
 
+// =====================================================
+// RESEND FORGOT PASSWORD OTP
+// =====================================================
+
 /**
  * @name ResendForgotPasswordOTPController
  * @route POST /api/auth/resend-forgot-password-otp
  * @description
  * Generates and sends a new password-reset OTP.
- * The previous OTP becomes invalid immediately.
- * Resend is allowed once every 60 seconds.
+ * Previous OTP becomes invalid immediately.
  * @access Public
  */
 async function ResendForgotPasswordOTPController(req, res) {
   try {
     const { username } = req.body || {};
 
-    // Validate username
+    // --------------------------------------------------
+    // VALIDATE USERNAME
+    // --------------------------------------------------
+
     if (!username) {
       return res.status(400).json({
         success: false,
@@ -162,14 +247,18 @@ async function ResendForgotPasswordOTPController(req, res) {
       });
     }
 
-    // Find user
+    // --------------------------------------------------
+    // FIND USER
+    // --------------------------------------------------
+
     const user = await UserModel.findOne({
       username: normalizedUsername,
     });
 
-    /*
-     * Do not reveal whether username exists.
-     */
+    // --------------------------------------------------
+    // DO NOT REVEAL USER EXISTENCE
+    // --------------------------------------------------
+
     if (!user) {
       return res.status(200).json({
         success: true,
@@ -177,10 +266,22 @@ async function ResendForgotPasswordOTPController(req, res) {
       });
     }
 
-    // MongoDB built-in _id
+    // --------------------------------------------------
+    // USER ID
+    // --------------------------------------------------
+
     const userId = user._id.toString();
 
-    // Check 60-second cooldown
+    // --------------------------------------------------
+    // MASK EMAIL
+    // --------------------------------------------------
+
+    const maskedEmail = maskEmail(user.email);
+
+    // --------------------------------------------------
+    // CHECK COOLDOWN
+    // --------------------------------------------------
+
     const allowed = await isResendAllowed({
       userId,
       purpose: "FORGOT_PASSWORD",
@@ -190,29 +291,27 @@ async function ResendForgotPasswordOTPController(req, res) {
       return res.status(429).json({
         success: false,
         message: "Please wait 60 seconds before requesting another OTP",
+        remainingSeconds: 60,
+        maskedEmail,
       });
     }
 
-    // Generate NEW OTP
+    // --------------------------------------------------
+    // GENERATE NEW OTP
+    // --------------------------------------------------
+
     const otp = generateOTP();
 
-    // Hash NEW OTP
+    // --------------------------------------------------
+    // HASH NEW OTP
+    // --------------------------------------------------
+
     const otpHash = hashOTP(otp);
 
-    /*
-     * IMPORTANT:
-     *
-     * createOTP() uses the same Redis key:
-     *
-     * recovery:otp:FORGOT_PASSWORD:<userId>
-     *
-     * Redis SET replaces the old value.
-     *
-     * Therefore:
-     *
-     * OLD OTP -> INVALID
-     * NEW OTP -> VALID
-     */
+    // --------------------------------------------------
+    // SAVE NEW OTP
+    // --------------------------------------------------
+
     await createOTP({
       userId,
       purpose: "FORGOT_PASSWORD",
@@ -220,22 +319,34 @@ async function ResendForgotPasswordOTPController(req, res) {
       otpHash,
     });
 
-    // Restart 60-second cooldown
+    // --------------------------------------------------
+    // RESET COOLDOWN
+    // --------------------------------------------------
+
     await setResendCooldown({
       userId,
       purpose: "FORGOT_PASSWORD",
     });
 
-    // Send NEW OTP
+    // --------------------------------------------------
+    // SEND NEW OTP
+    // --------------------------------------------------
+
     await sendOTPEmail({
       email: user.email,
       otp,
       purpose: "FORGOT_PASSWORD",
     });
 
+    // --------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------
+
     return res.status(200).json({
       success: true,
       message: "A new OTP has been sent to your registered email",
+      maskedEmail,
+      remainingSeconds: 60,
     });
   } catch (error) {
     console.error("Resend Forgot Password OTP Error:", error);
@@ -247,18 +358,25 @@ async function ResendForgotPasswordOTPController(req, res) {
   }
 }
 
+// =====================================================
+// VERIFY PASSWORD OTP
+// =====================================================
+
 /**
  * @name VerifyPasswordOTPController
  * @route POST /api/auth/verify-password-otp
  * @description
- * Verifies the password-reset OTP using username.
+ * Verifies password-reset OTP using username.
  * @access Public
  */
 async function VerifyPasswordOTPController(req, res) {
   try {
     const { username, otp } = req.body || {};
 
-    // Validate fields
+    // --------------------------------------------------
+    // VALIDATE
+    // --------------------------------------------------
+
     if (!username || !otp) {
       return res.status(400).json({
         success: false,
@@ -269,7 +387,10 @@ async function VerifyPasswordOTPController(req, res) {
     const normalizedUsername = username.trim();
     const normalizedOTP = otp.toString().trim();
 
-    // Validate OTP format
+    // --------------------------------------------------
+    // VALIDATE OTP FORMAT
+    // --------------------------------------------------
+
     if (!/^\d{6}$/.test(normalizedOTP)) {
       return res.status(400).json({
         success: false,
@@ -277,7 +398,10 @@ async function VerifyPasswordOTPController(req, res) {
       });
     }
 
-    // Find user
+    // --------------------------------------------------
+    // FIND USER
+    // --------------------------------------------------
+
     const user = await UserModel.findOne({
       username: normalizedUsername,
     });
@@ -289,13 +413,18 @@ async function VerifyPasswordOTPController(req, res) {
       });
     }
 
-    // MongoDB built-in _id
     const userId = user._id.toString();
 
-    // Hash submitted OTP
+    // --------------------------------------------------
+    // HASH SUBMITTED OTP
+    // --------------------------------------------------
+
     const otpHash = hashOTP(normalizedOTP);
 
-    // Verify OTP
+    // --------------------------------------------------
+    // VERIFY OTP
+    // --------------------------------------------------
+
     const result = await verifyOTP({
       userId,
       purpose: "FORGOT_PASSWORD",
@@ -303,7 +432,7 @@ async function VerifyPasswordOTPController(req, res) {
     });
 
     if (!result.success) {
-      // OTP expired
+      // EXPIRED
       if (result.reason === "EXPIRED") {
         return res.status(400).json({
           success: false,
@@ -311,7 +440,7 @@ async function VerifyPasswordOTPController(req, res) {
         });
       }
 
-      // Maximum attempts reached
+      // MAX ATTEMPTS
       if (result.reason === "MAX_ATTEMPTS") {
         return res.status(429).json({
           success: false,
@@ -319,33 +448,42 @@ async function VerifyPasswordOTPController(req, res) {
         });
       }
 
-      // Invalid OTP
+      // INVALID
       return res.status(400).json({
         success: false,
         message: "Invalid OTP",
       });
     }
 
-    /*
-     * OTP is valid.
-     *
-     * Delete it immediately so it cannot be reused.
-     */
+    // --------------------------------------------------
+    // DELETE OTP
+    // --------------------------------------------------
+
     await deleteOTP(result.key);
 
-    /*
-     * Create temporary password reset token.
-     *
-     * Token expires in 10 minutes.
-     */
+    // --------------------------------------------------
+    // CREATE RESET TOKEN
+    // --------------------------------------------------
+
     const resetToken = await createPasswordResetToken({
       userId,
     });
+
+    // --------------------------------------------------
+    // MASK EMAIL
+    // --------------------------------------------------
+
+    const maskedEmail = maskEmail(user.email);
+
+    // --------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------
 
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
       resetToken,
+      maskedEmail,
     });
   } catch (error) {
     console.error("Verify Password OTP Error:", error);
@@ -357,22 +495,25 @@ async function VerifyPasswordOTPController(req, res) {
   }
 }
 
+// =====================================================
+// RESET PASSWORD
+// =====================================================
+
 /**
  * @name ResetPasswordController
  * @route POST /api/auth/reset-password
  * @description
- * Resets the user's password using the temporary reset token.
+ * Resets password using temporary reset token.
  * @access Public
  */
 async function ResetPasswordController(req, res) {
   try {
-    const {
-      resetToken,
-      newPassword,
-      confirmPassword,
-    } = req.body || {};
+    const { resetToken, newPassword, confirmPassword } = req.body || {};
 
-    // Validate fields
+    // --------------------------------------------------
+    // VALIDATE FIELDS
+    // --------------------------------------------------
+
     if (!resetToken || !newPassword || !confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -380,7 +521,10 @@ async function ResetPasswordController(req, res) {
       });
     }
 
-    // Check passwords
+    // --------------------------------------------------
+    // PASSWORD MATCH
+    // --------------------------------------------------
+
     if (newPassword !== confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -388,7 +532,10 @@ async function ResetPasswordController(req, res) {
       });
     }
 
-    // Password length
+    // --------------------------------------------------
+    // PASSWORD LENGTH
+    // --------------------------------------------------
+
     if (newPassword.length < 8) {
       return res.status(400).json({
         success: false,
@@ -396,7 +543,10 @@ async function ResetPasswordController(req, res) {
       });
     }
 
-    // Get user ID from Redis reset token
+    // --------------------------------------------------
+    // GET RESET DATA
+    // --------------------------------------------------
+
     const resetData = await getPasswordResetUser(resetToken);
 
     if (!resetData) {
@@ -406,9 +556,10 @@ async function ResetPasswordController(req, res) {
       });
     }
 
-    /*
-     * Find user using MongoDB's built-in _id.
-     */
+    // --------------------------------------------------
+    // FIND USER
+    // --------------------------------------------------
+
     const user = await UserModel.findById(resetData.userId);
 
     if (!user) {
@@ -420,18 +571,25 @@ async function ResetPasswordController(req, res) {
       });
     }
 
-    // Hash new password
+    // --------------------------------------------------
+    // HASH PASSWORD
+    // --------------------------------------------------
+
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    // Update password
     user.password = hashedPassword;
 
     await user.save();
 
-    /*
-     * Reset token can only be used once.
-     */
+    // --------------------------------------------------
+    // DELETE RESET TOKEN
+    // --------------------------------------------------
+
     await deletePasswordResetToken(resetData.key);
+
+    // --------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------
 
     return res.status(200).json({
       success: true,
@@ -446,6 +604,10 @@ async function ResetPasswordController(req, res) {
     });
   }
 }
+
+// =====================================================
+// EXPORT
+// =====================================================
 
 module.exports = {
   ForgotPasswordController,

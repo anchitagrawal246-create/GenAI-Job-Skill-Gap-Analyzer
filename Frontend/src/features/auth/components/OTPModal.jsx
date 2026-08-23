@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import {
   FiArrowRight,
@@ -15,41 +14,38 @@ const RESEND_TIME = 60;
 
 const OTPModal = ({
   isOpen,
-  email,
+  email = "",
   darkMode,
   loading = false,
   error = "",
   purpose = "verification",
-
-  // Backend should provide the actual remaining cooldown.
-  resendCooldown = 60,
-
+  resendCooldown = RESEND_TIME,
   onClose,
   onVerify,
   onResend,
 }) => {
   const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(""));
+
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMessage, setResendMessage] = useState("");
   const [timer, setTimer] = useState(resendCooldown);
 
   const inputRefs = useRef([]);
 
-  /*
-   * Reset modal state whenever it opens.
-   */
+  // =====================================================
+  // RESET MODAL
+  // =====================================================
+
   useEffect(() => {
     if (!isOpen) return;
 
     setOtp(Array(OTP_LENGTH).fill(""));
     setResendMessage("");
 
-    // IMPORTANT:
-    // Use backend-provided cooldown instead of always assuming 60.
     setTimer(
       typeof resendCooldown === "number" && resendCooldown > 0
         ? resendCooldown
-        : 0
+        : 0,
     );
 
     const timeout = setTimeout(() => {
@@ -59,36 +55,38 @@ const OTPModal = ({
     return () => clearTimeout(timeout);
   }, [isOpen, resendCooldown]);
 
-  /*
-   * Countdown timer.
-   *
-   * The backend/Redis decides the initial value.
-   * Frontend only counts down locally.
-   */
+  // =====================================================
+  // COUNTDOWN
+  // =====================================================
+
   useEffect(() => {
     if (!isOpen || timer <= 0) return;
 
     const interval = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
+      setTimer((previous) => {
+        if (previous <= 1) {
           clearInterval(interval);
           return 0;
         }
 
-        return prev - 1;
+        return previous - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
   }, [isOpen, timer]);
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return null;
+  }
 
   const otpValue = otp.join("");
+  const isComplete = otpValue.length === OTP_LENGTH;
 
-  /*
-   * Modal title.
-   */
+  // =====================================================
+  // TITLE
+  // =====================================================
+
   const getTitle = () => {
     switch (purpose) {
       case "register":
@@ -99,49 +97,52 @@ const OTPModal = ({
       case "FORGOT_PASSWORD":
         return "Verify password reset";
 
+      case "forgot-user-id":
       case "forgot-id":
+      case "FORGOT_USER_ID":
       case "FORGOT_ID":
-        return "Verify your identity";
+        return "Verify User ID";
 
       default:
         return "Verify your email";
     }
   };
 
-  /*
-   * Modal description.
-   */
+  // =====================================================
+  // DESCRIPTION
+  // =====================================================
+
   const getDescription = () => {
     switch (purpose) {
       case "register":
       case "REGISTER":
-        return "Enter the verification code sent to your email to complete registration.";
+        return "Enter the verification code sent to your email.";
 
       case "forgot-password":
       case "FORGOT_PASSWORD":
-        return "Enter the verification code sent to your email to continue resetting your password.";
+        return "Enter the code sent to your email to continue.";
 
+      case "forgot-user-id":
       case "forgot-id":
+      case "FORGOT_USER_ID":
       case "FORGOT_ID":
-        return "Enter the verification code sent to your email to recover your account ID.";
+        return "Enter the code sent to your email to recover your account ID.";
 
       default:
         return "Enter the verification code sent to your email.";
     }
   };
 
-  /*
-   * Handle OTP input.
-   */
+  // =====================================================
+  // OTP CHANGE
+  // =====================================================
+
   const handleChange = (index, value) => {
     const numericValue = value.replace(/\D/g, "");
 
-    /*
-     * User deleted the value.
-     */
     if (!numericValue) {
-      setOtp((prev) => {
-        const updated = [...prev];
+      setOtp((previous) => {
+        const updated = [...previous];
         updated[index] = "";
         return updated;
       });
@@ -149,10 +150,7 @@ const OTPModal = ({
       return;
     }
 
-    /*
-     * If multiple digits are entered/pasted
-     * into one field, distribute them.
-     */
+    // Paste multiple digits into current position
     if (numericValue.length > 1) {
       const newOtp = [...otp];
 
@@ -165,53 +163,37 @@ const OTPModal = ({
 
       setOtp(newOtp);
 
-      const filledCount = Math.min(
-        index + numericValue.length,
-        OTP_LENGTH
-      );
-
-      const nextIndex = Math.min(
-        filledCount,
-        OTP_LENGTH - 1
-      );
+      const nextIndex = Math.min(index + numericValue.length, OTP_LENGTH - 1);
 
       inputRefs.current[nextIndex]?.focus();
 
       return;
     }
 
-    /*
-     * Normal single digit input.
-     */
     const digit = numericValue.slice(-1);
 
-    setOtp((prev) => {
-      const updated = [...prev];
+    setOtp((previous) => {
+      const updated = [...previous];
       updated[index] = digit;
       return updated;
     });
 
-    /*
-     * Move to next input.
-     */
     if (index < OTP_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
-  /*
-   * Keyboard controls.
-   */
+  // =====================================================
+  // KEYBOARD
+  // =====================================================
+
   const handleKeyDown = (index, event) => {
-    /*
-     * Backspace.
-     */
     if (event.key === "Backspace") {
       event.preventDefault();
 
       if (otp[index]) {
-        setOtp((prev) => {
-          const updated = [...prev];
+        setOtp((previous) => {
+          const updated = [...previous];
           updated[index] = "";
           return updated;
         });
@@ -219,13 +201,9 @@ const OTPModal = ({
         return;
       }
 
-      /*
-       * If current field is empty,
-       * move to previous field.
-       */
       if (index > 0) {
-        setOtp((prev) => {
-          const updated = [...prev];
+        setOtp((previous) => {
+          const updated = [...previous];
           updated[index - 1] = "";
           return updated;
         });
@@ -236,13 +214,7 @@ const OTPModal = ({
       return;
     }
 
-    /*
-     * Left arrow.
-     */
-    if (
-      event.key === "ArrowLeft" &&
-      index > 0
-    ) {
+    if (event.key === "ArrowLeft" && index > 0) {
       event.preventDefault();
 
       inputRefs.current[index - 1]?.focus();
@@ -250,24 +222,17 @@ const OTPModal = ({
       return;
     }
 
-    /*
-     * Right arrow.
-     */
-    if (
-      event.key === "ArrowRight" &&
-      index < OTP_LENGTH - 1
-    ) {
+    if (event.key === "ArrowRight" && index < OTP_LENGTH - 1) {
       event.preventDefault();
 
       inputRefs.current[index + 1]?.focus();
-
-      return;
     }
   };
 
-  /*
-   * Handle complete OTP paste.
-   */
+  // =====================================================
+  // PASTE
+  // =====================================================
+
   const handlePaste = (event) => {
     event.preventDefault();
 
@@ -280,60 +245,41 @@ const OTPModal = ({
 
     const newOtp = Array(OTP_LENGTH).fill("");
 
-    pastedValue
-      .split("")
-      .forEach((digit, index) => {
-        newOtp[index] = digit;
-      });
+    pastedValue.split("").forEach((digit, index) => {
+      newOtp[index] = digit;
+    });
 
     setOtp(newOtp);
 
-    /*
-     * Focus the last filled field.
-     */
-    const nextIndex = Math.min(
-      pastedValue.length,
-      OTP_LENGTH - 1
-    );
+    const nextIndex = Math.min(pastedValue.length, OTP_LENGTH - 1);
 
     inputRefs.current[nextIndex]?.focus();
   };
 
-  /*
-   * Verify OTP.
-   */
+  // =====================================================
+  // VERIFY
+  // =====================================================
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (loading) return;
-
-    if (otpValue.length !== OTP_LENGTH) {
+    if (loading || !isComplete) {
       return;
     }
 
     try {
       await onVerify(otpValue);
     } catch (err) {
-      console.error(
-        "OTP verification error:",
-        err
-      );
+      console.error("OTP verification error:", err);
     }
   };
 
-  /*
-   * Resend OTP.
-   *
-   * IMPORTANT:
-   * onResend() MUST return response.data
-   * from Register.jsx.
-   */
+  // =====================================================
+  // RESEND
+  // =====================================================
+
   const handleResend = async () => {
-    if (
-      timer > 0 ||
-      resendLoading ||
-      loading
-    ) {
+    if (timer > 0 || resendLoading || loading) {
       return;
     }
 
@@ -343,50 +289,25 @@ const OTPModal = ({
 
       const response = await onResend();
 
-      /*
-       * Backend should return:
-       *
-       * {
-       *   success: true,
-       *   message: "...",
-       *   remainingSeconds: 60
-       * }
-       */
       const remainingSeconds =
         Number(response?.remainingSeconds) ||
+        Number(response?.data?.remainingSeconds) ||
         RESEND_TIME;
 
       setTimer(remainingSeconds);
 
-      /*
-       * Clear old OTP.
-       */
       setOtp(Array(OTP_LENGTH).fill(""));
 
-      setResendMessage("NEW OTP SENT");
+      setResendMessage("New code sent");
 
       setTimeout(() => {
         inputRefs.current[0]?.focus();
       }, 100);
     } catch (err) {
-      console.error(
-        "Resend OTP error:",
-        err
-      );
+      console.error("Resend OTP error:", err);
 
-      /*
-       * Backend may reject the request with:
-       *
-       * {
-       *   remainingSeconds: 55
-       * }
-       *
-       * Synchronize frontend with Redis.
-       */
       const remainingSeconds =
-        Number(
-          err?.response?.data?.remainingSeconds
-        ) || 0;
+        Number(err?.response?.data?.remainingSeconds) || 0;
 
       if (remainingSeconds > 0) {
         setTimer(remainingSeconds);
@@ -395,7 +316,8 @@ const OTPModal = ({
       setResendMessage(
         err?.response?.data?.message ||
           err?.response?.data?.error ||
-          "COULD NOT RESEND OTP"
+          err?.message ||
+          "Could not resend code",
       );
     } finally {
       setResendLoading(false);
@@ -403,9 +325,13 @@ const OTPModal = ({
   };
 
   const isResendError =
-    resendMessage.startsWith("COULD NOT") ||
-    resendMessage.startsWith("Please wait") ||
-    resendMessage.startsWith("Please");
+    resendMessage.toLowerCase().includes("could") ||
+    resendMessage.toLowerCase().includes("wait") ||
+    resendMessage.toLowerCase().includes("error");
+
+  // =====================================================
+  // UI
+  // =====================================================
 
   return (
     <div
@@ -416,178 +342,163 @@ const OTPModal = ({
     >
       {/* BACKDROP */}
       <div
-        className={`absolute inset-0 backdrop-blur-xl ${
-          darkMode
-            ? "bg-black/75"
-            : "bg-black/45"
+        className={`absolute inset-0 backdrop-blur-md ${
+          darkMode ? "bg-black/75" : "bg-black/45"
         }`}
-        onClick={
-          !loading && !resendLoading
-            ? onClose
-            : undefined
-        }
+        onClick={!loading && !resendLoading ? onClose : undefined}
       />
 
       {/* MODAL */}
       <div
-        className={`relative z-10 w-full max-w-[430px] overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-2xl ${
+        className={`relative z-10 w-full max-w-[410px] overflow-hidden border shadow-2xl ${
           darkMode
-            ? "border-white/10 bg-[#111014]/90 shadow-purple-950/40"
-            : "border-white/50 bg-white/80 shadow-purple-900/20"
+            ? "border-purple-500/30 bg-[#0b0810]"
+            : "border-purple-500/30 bg-white"
         }`}
       >
-        {/* TOP GLOW */}
-        <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-purple-600/20 blur-[80px]" />
-
-        <div className="pointer-events-none absolute -bottom-20 -right-20 h-48 w-48 rounded-full bg-indigo-600/20 blur-[80px]" />
+        {/* TOP ACCENT */}
+        <div className="h-[2px] bg-gradient-to-r from-purple-500 via-fuchsia-400 to-purple-500" />
 
         {/* HEADER */}
         <div
-          className={`relative flex items-center justify-between border-b px-5 py-4 ${
-            darkMode
-              ? "border-white/10"
-              : "border-black/10"
+          className={`flex items-center justify-between border-b px-5 py-4 ${
+            darkMode ? "border-white/10" : "border-black/10"
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-purple-400/30 bg-purple-500/15 text-purple-400 shadow-lg shadow-purple-900/20">
-              <FiShield size={19} />
+            <div
+              className={`flex h-9 w-9 items-center justify-center border ${
+                darkMode
+                  ? "border-purple-400/30 bg-purple-500/10 text-purple-400"
+                  : "border-purple-500/30 bg-purple-50 text-purple-600"
+              }`}
+            >
+              <FiShield size={17} />
             </div>
 
-            <div>
-              <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-purple-400">
-                Secure Verification
-              </p>
-
-              <p
-                className={`mt-1 font-mono text-[7px] uppercase tracking-wider ${
-                  darkMode
-                    ? "text-white/35"
-                    : "text-black/40"
-                }`}
-              >
-                One Time Password
-              </p>
-            </div>
+            <span
+              className={`font-mono text-[9px] font-bold uppercase tracking-[0.16em] ${
+                darkMode ? "text-white/70" : "text-black/70"
+              }`}
+            >
+              Secure verification
+            </span>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            disabled={
-              loading || resendLoading
-            }
+            disabled={loading || resendLoading}
             aria-label="Close OTP modal"
-            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition ${
+            className={`flex h-8 w-8 items-center justify-center border transition ${
               darkMode
-                ? "border-white/10 bg-white/5 text-white/40 hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-400"
-                : "border-black/10 bg-black/5 text-black/40 hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-500"
+                ? "border-white/10 text-white/40 hover:border-red-400/50 hover:text-red-400"
+                : "border-black/10 text-black/40 hover:border-red-400/50 hover:text-red-500"
             }`}
           >
-            <FiX size={15} />
+            <FiX size={14} />
           </button>
         </div>
 
         {/* BODY */}
-        <div className="relative px-5 py-6 sm:px-7">
-          {/* INTRO */}
+        <div className="px-5 py-7 sm:px-7">
+          {/* TITLE */}
           <div className="text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-purple-400/30 bg-purple-500/10 text-purple-400 shadow-lg shadow-purple-900/20">
-              <FiMail size={24} />
+            <div
+              className={`mx-auto mb-4 flex h-12 w-12 items-center justify-center border ${
+                darkMode
+                  ? "border-purple-400/30 bg-purple-500/10 text-purple-400"
+                  : "border-purple-500/30 bg-purple-50 text-purple-600"
+              }`}
+            >
+              <FiMail size={21} />
             </div>
 
             <h2
               id="otp-modal-title"
-              className={`font-mono text-xl font-black uppercase tracking-tight ${
-                darkMode
-                  ? "text-white"
-                  : "text-black"
+              className={`font-mono text-xl font-black tracking-tight ${
+                darkMode ? "text-white" : "text-black"
               }`}
             >
               {getTitle()}
             </h2>
 
             <p
-              className={`mx-auto mt-2 max-w-[320px] font-mono text-[8px] leading-4 ${
-                darkMode
-                  ? "text-white/40"
-                  : "text-black/45"
+              className={`mx-auto mt-2 max-w-[300px] font-mono text-[8px] leading-4 ${
+                darkMode ? "text-white/40" : "text-black/45"
               }`}
             >
               {getDescription()}
             </p>
 
-            {/* EMAIL */}
-            <div className="mx-auto mt-3 inline-flex max-w-full items-center rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-2">
-              <span className="truncate font-mono text-[8px] font-bold text-purple-400">
-                {email}
+            {/* MASKED EMAIL */}
+            <div
+              className={`mx-auto mt-4 inline-flex max-w-full items-center gap-2 border px-3 py-2 ${
+                darkMode
+                  ? "border-purple-500/20 bg-purple-500/5"
+                  : "border-purple-500/20 bg-purple-50"
+              }`}
+            >
+              <FiMail
+                size={10}
+                className={darkMode ? "text-purple-400" : "text-purple-600"}
+              />
+
+              <span
+                className={`truncate font-mono text-[8px] font-bold ${
+                  darkMode ? "text-purple-400" : "text-purple-700"
+                }`}
+              >
+                {email || "your registered email"}
               </span>
             </div>
           </div>
 
-          {/* OTP FORM */}
-          <form
-            onSubmit={handleSubmit}
-            className="mt-7"
-          >
-            <div className="flex justify-center gap-2 sm:gap-3">
+          {/* FORM */}
+          <form onSubmit={handleSubmit} className="mt-8">
+            {/* OTP INPUTS */}
+            <div className="flex justify-center gap-2.5 sm:gap-3">
               {otp.map((digit, index) => (
                 <input
                   key={index}
                   ref={(element) => {
-                    inputRefs.current[index] =
-                      element;
+                    inputRefs.current[index] = element;
                   }}
                   type="text"
                   inputMode="numeric"
-                  autoComplete={
-                    index === 0
-                      ? "one-time-code"
-                      : "off"
-                  }
+                  autoComplete={index === 0 ? "one-time-code" : "off"}
                   maxLength={OTP_LENGTH}
                   value={digit}
-                  disabled={
-                    loading || resendLoading
-                  }
-                  onChange={(event) =>
-                    handleChange(
-                      index,
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={(event) =>
-                    handleKeyDown(
-                      index,
-                      event
-                    )
-                  }
+                  disabled={loading || resendLoading}
+                  onChange={(event) => handleChange(index, event.target.value)}
+                  onKeyDown={(event) => handleKeyDown(index, event)}
                   onPaste={handlePaste}
-                  aria-label={`OTP digit ${
-                    index + 1
-                  }`}
-                  className={`h-12 w-10 rounded-xl border text-center font-mono text-lg font-black outline-none transition-all duration-200 sm:h-14 sm:w-12 ${
+                  aria-label={`OTP digit ${index + 1}`}
+                  className={`h-12 w-10 border text-center font-mono text-lg font-black outline-none transition-all sm:h-13 sm:w-11 ${
                     digit
-                      ? "border-purple-400 bg-purple-500/15 text-purple-400 shadow-[0_0_20px_rgba(139,92,246,0.15)]"
+                      ? darkMode
+                        ? "border-green-400 bg-green-400/10 text-green-400"
+                        : "border-green-500 bg-green-50 text-green-700"
                       : darkMode
-                        ? "border-white/10 bg-white/[0.04] text-white hover:border-purple-500/30"
-                        : "border-black/10 bg-white/50 text-black hover:border-purple-500/30"
-                  } focus:border-purple-400 focus:ring-2 focus:ring-purple-500/10`}
+                        ? "border-white/10 bg-white/[0.03] text-white"
+                        : "border-black/10 bg-black/[0.02] text-black"
+                  } focus:border-purple-400 focus:ring-1 focus:ring-purple-400/20`}
                 />
               ))}
             </div>
 
             {/* ERROR */}
             {error && (
-              <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2">
-                <FiX
-                  className="shrink-0 text-red-400"
-                  size={12}
-                />
+              <div
+                className={`mt-4 flex items-center gap-2 border px-3 py-2 ${
+                  darkMode
+                    ? "border-red-400/20 bg-red-500/5 text-red-400"
+                    : "border-red-400/30 bg-red-50 text-red-500"
+                }`}
+              >
+                <FiX size={12} />
 
-                <p className="font-mono text-[7px] font-bold uppercase text-red-400">
-                  {error}
-                </p>
+                <p className="font-mono text-[7px] font-bold">{error}</p>
               </div>
             )}
 
@@ -595,33 +506,27 @@ const OTPModal = ({
             {resendMessage && (
               <div
                 className={`mt-3 flex items-center justify-center gap-1 font-mono text-[7px] font-bold ${
-                  isResendError
-                    ? "text-red-400"
-                    : "text-green-400"
+                  isResendError ? "text-red-400" : "text-green-400"
                 }`}
               >
-                {!isResendError && (
-                  <FiCheck size={9} />
-                )}
+                {!isResendError && <FiCheck size={9} />}
 
                 {resendMessage}
               </div>
             )}
 
-            {/* VERIFY BUTTON */}
+            {/* VERIFY */}
             <button
               type="submit"
-              disabled={
-                loading ||
-                resendLoading ||
-                otpValue.length !== OTP_LENGTH
-              }
-              className={`group mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-purple-400 bg-purple-600 font-mono text-[8px] font-black uppercase tracking-[0.15em] text-white shadow-[0_5px_20px_rgba(124,58,237,0.25)] transition-all ${
-                loading ||
-                resendLoading ||
-                otpValue.length !== OTP_LENGTH
-                  ? "cursor-not-allowed opacity-40"
-                  : "hover:bg-purple-500 hover:shadow-[0_5px_30px_rgba(124,58,237,0.4)]"
+              disabled={loading || resendLoading || !isComplete}
+              className={`group mt-5 flex h-11 w-full items-center justify-center gap-2 border font-mono text-[8px] font-black uppercase tracking-[0.15em] transition-all ${
+                loading || resendLoading || !isComplete
+                  ? darkMode
+                    ? "cursor-not-allowed border-purple-500/20 bg-purple-500/5 text-white/20"
+                    : "cursor-not-allowed border-purple-500/20 bg-purple-50 text-black/30"
+                  : darkMode
+                    ? "border-purple-400 bg-purple-600 text-white hover:bg-purple-500"
+                    : "border-purple-600 bg-purple-600 text-white hover:bg-purple-500"
               }`}
             >
               {loading ? (
@@ -631,8 +536,7 @@ const OTPModal = ({
                 </>
               ) : (
                 <>
-                  Verify OTP
-
+                  Verify code
                   <FiArrowRight
                     size={13}
                     className="transition-transform group-hover:translate-x-1"
@@ -646,17 +550,19 @@ const OTPModal = ({
           <div className="mt-5 text-center">
             {timer > 0 ? (
               <div
-                className={`inline-flex items-center gap-2 font-mono text-[7px] uppercase ${
-                  darkMode
-                    ? "text-white/30"
-                    : "text-black/40"
+                className={`inline-flex items-center gap-2 font-mono text-[7px] ${
+                  darkMode ? "text-white/30" : "text-black/40"
                 }`}
               >
                 <FiClock size={10} />
-
-                Resend OTP in{" "}
-
-                <span className="font-bold text-purple-400">
+                Resend code in
+                <span
+                  className={
+                    darkMode
+                      ? "font-bold text-purple-400"
+                      : "font-bold text-purple-600"
+                  }
+                >
                   {timer}s
                 </span>
               </div>
@@ -664,46 +570,31 @@ const OTPModal = ({
               <button
                 type="button"
                 onClick={handleResend}
-                disabled={
-                  resendLoading || loading
-                }
-                className="inline-flex items-center gap-2 font-mono text-[7px] font-bold uppercase tracking-wider text-purple-400 transition hover:text-purple-300 disabled:opacity-40"
+                disabled={resendLoading || loading}
+                className={`inline-flex items-center gap-2 font-mono text-[7px] font-bold uppercase tracking-wider transition disabled:opacity-40 ${
+                  darkMode
+                    ? "text-purple-400 hover:text-purple-300"
+                    : "text-purple-600 hover:text-purple-500"
+                }`}
               >
                 <FiRefreshCw
                   size={10}
-                  className={
-                    resendLoading
-                      ? "animate-spin"
-                      : ""
-                  }
+                  className={resendLoading ? "animate-spin" : ""}
                 />
 
-                {resendLoading
-                  ? "Sending..."
-                  : "Resend OTP"}
+                {resendLoading ? "Sending..." : "Resend code"}
               </button>
             )}
           </div>
 
-          {/* SECURITY */}
-          <div
-            className={`mt-5 border-t pt-4 text-center ${
-              darkMode
-                ? "border-white/5"
-                : "border-black/5"
+          {/* FOOTNOTE */}
+          <p
+            className={`mt-6 text-center font-mono text-[6px] uppercase tracking-widest ${
+              darkMode ? "text-white/15" : "text-black/20"
             }`}
           >
-            <p
-              className={`font-mono text-[6px] uppercase tracking-widest ${
-                darkMode
-                  ? "text-white/20"
-                  : "text-black/25"
-              }`}
-            >
-              Never share your verification code
-              with anyone
-            </p>
-          </div>
+            Never share your verification code
+          </p>
         </div>
       </div>
     </div>
@@ -711,4 +602,3 @@ const OTPModal = ({
 };
 
 export default OTPModal;
-

@@ -2,6 +2,9 @@ const UserModel = require("../model/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+// Built into Node.js — DO NOT npm install dns.promises
+const dns = require("node:dns/promises");
+
 const { redisClient } = require("../config/redis");
 
 const { generateOTP, hashOTP } = require("../utils/otp.utils");
@@ -70,6 +73,159 @@ function setAuthCookie(res, token) {
   });
 }
 
+/**
+ * Check whether an email domain has a valid mail server.
+ *
+ * IMPORTANT:
+ * This checks the DOMAIN, not whether the exact mailbox exists.
+ *
+ * @param {string} email
+ * @returns {Promise<boolean>}
+ */
+async function isEmailDomainValid(email) {
+  try {
+    const parts = email.split("@");
+
+    if (parts.length !== 2) {
+      return false;
+    }
+
+    const domain = parts[1].trim().toLowerCase();
+
+    if (!domain) {
+      return false;
+    }
+
+    // Try MX records first.
+    try {
+      const mxRecords = await dns.resolveMx(domain);
+
+      if (Array.isArray(mxRecords) && mxRecords.length > 0) {
+        return true;
+      }
+    } catch (mxError) {
+      // Continue with A/AAAA lookup.
+    }
+
+    // Some valid domains may not have MX records.
+    try {
+      const addresses = await dns.lookup(domain, {
+        all: true,
+      });
+
+      return Array.isArray(addresses) && addresses.length > 0;
+    } catch (lookupError) {
+      return false;
+    }
+  } catch (error) {
+    return false;
+  }
+}
+
+// =========================================================
+// CHECK EMAIL
+// =========================================================
+
+/**
+ * @name CheckEmailController
+ * @route GET /api/auth/check-email
+ * @description
+ * Realtime checks whether an email is valid and available.
+ *
+ * This endpoint is intended for frontend realtime validation.
+ *
+ * @access Public
+ */
+async function CheckEmailController(req, res) {
+  try {
+    // =====================================================
+    // 1. GET EMAIL
+    // =====================================================
+
+    const { email } = req.query || {};
+
+    // =====================================================
+    // 2. EMAIL REQUIRED
+    // =====================================================
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        available: false,
+        valid: false,
+        exists: false,
+        message: "Email is required",
+      });
+    }
+
+    // =====================================================
+    // 3. NORMALIZE EMAIL
+    // =====================================================
+
+    const normalizedEmail = email.toString().trim().toLowerCase();
+
+    // =====================================================
+    // 4. EMAIL FORMAT
+    // =====================================================
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(200).json({
+        success: true,
+        available: false,
+        valid: false,
+        exists: false,
+        message: "Invalid email format",
+      });
+    }
+
+    // =====================================================
+    // 5. CHECK DATABASE
+    // =====================================================
+
+    const existingUser = await UserModel.findOne({
+      email: normalizedEmail,
+    }).select("_id");
+
+    // =====================================================
+    // 6. EMAIL ALREADY EXISTS
+    // =====================================================
+
+    if (existingUser) {
+      return res.status(200).json({
+        success: true,
+        available: false,
+        valid: true,
+        exists: true,
+        message: "Email already exists",
+      });
+    }
+
+    // =====================================================
+    // 7. EMAIL AVAILABLE
+    // =====================================================
+
+    return res.status(200).json({
+      success: true,
+      available: true,
+      valid: true,
+      exists: false,
+      message: "Email is available",
+    });
+  } catch (error) {
+    console.error("Check Email Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      available: false,
+      valid: false,
+      exists: false,
+      message: "Internal server error",
+    });
+  }
+}
+
 // =========================================================
 // REGISTER
 // =========================================================
@@ -79,8 +235,7 @@ function setAuthCookie(res, token) {
  * @route POST /api/auth/register
  * @description
  * Temporarily stores registration information in Redis,
- * creates an OTP using the recovery service and sends
- * the OTP to the user's email.
+ * creates an OTP and sends the OTP to the user's email.
  *
  * MongoDB user is created only after OTP verification.
  *
@@ -125,7 +280,7 @@ async function RegisterUserController(req, res) {
     }
 
     // =====================================================
-    // 5. VALIDATE EMAIL
+    // 5. VALIDATE EMAIL FORMAT
     // =====================================================
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -138,7 +293,20 @@ async function RegisterUserController(req, res) {
     }
 
     // =====================================================
-    // 6. VALIDATE PASSWORD
+    // 6. VALIDATE EMAIL DOMAIN
+    // =====================================================
+
+    const emailDomainValid = await isEmailDomainValid(normalizedEmail);
+
+    if (!emailDomainValid) {
+      return res.status(400).json({
+        success: false,
+        message: "This email domain does not have a valid mail server",
+      });
+    }
+
+    // =====================================================
+    // 7. VALIDATE PASSWORD
     // =====================================================
 
     if (password.length < 6) {
@@ -149,7 +317,7 @@ async function RegisterUserController(req, res) {
     }
 
     // =====================================================
-    // 7. CHECK EXISTING USER
+    // 8. CHECK EXISTING USER
     // =====================================================
 
     const existingUser = await UserModel.findOne({
@@ -167,6 +335,7 @@ async function RegisterUserController(req, res) {
     });
 
     if (existingUser) {
+      // Username already exists
       if (
         existingUser.username &&
         existingUser.username.toLowerCase() === normalizedUsername.toLowerCase()
@@ -177,6 +346,7 @@ async function RegisterUserController(req, res) {
         });
       }
 
+      // Email already exists
       if (
         existingUser.email &&
         existingUser.email.toLowerCase() === normalizedEmail
@@ -194,13 +364,13 @@ async function RegisterUserController(req, res) {
     }
 
     // =====================================================
-    // 8. REGISTRATION ID
+    // 9. REGISTRATION ID
     // =====================================================
 
     const registrationId = normalizedEmail;
 
     // =====================================================
-    // 9. CHECK RESEND COOLDOWN
+    // 10. CHECK RESEND COOLDOWN
     // =====================================================
 
     const resendAllowed = await isResendAllowed({
@@ -222,13 +392,13 @@ async function RegisterUserController(req, res) {
     }
 
     // =====================================================
-    // 10. HASH PASSWORD
+    // 11. HASH PASSWORD
     // =====================================================
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // =====================================================
-    // 11. GENERATE OTP
+    // 12. GENERATE OTP
     // =====================================================
 
     const otp = generateOTP();
@@ -236,13 +406,13 @@ async function RegisterUserController(req, res) {
     const hashedOTP = hashOTP(otp);
 
     // =====================================================
-    // 12. REGISTRATION DATA KEY
+    // 13. REGISTRATION DATA KEY
     // =====================================================
 
     const registrationDataKey = `register:data:${normalizedEmail}`;
 
     // =====================================================
-    // 13. REGISTRATION DATA
+    // 14. REGISTRATION DATA
     // =====================================================
 
     const registrationData = JSON.stringify({
@@ -252,13 +422,13 @@ async function RegisterUserController(req, res) {
     });
 
     // =====================================================
-    // 14. REMOVE OLD REGISTRATION DATA
+    // 15. REMOVE OLD REGISTRATION DATA
     // =====================================================
 
     await redisClient.del(registrationDataKey);
 
     // =====================================================
-    // 15. STORE REGISTRATION DATA
+    // 16. STORE REGISTRATION DATA
     // =====================================================
 
     await redisClient.set(registrationDataKey, registrationData, {
@@ -266,7 +436,7 @@ async function RegisterUserController(req, res) {
     });
 
     // =====================================================
-    // 16. CREATE OTP THROUGH RECOVERY SERVICE
+    // 17. CREATE OTP
     // =====================================================
 
     const otpKey = await createOTP({
@@ -280,10 +450,8 @@ async function RegisterUserController(req, res) {
 
     console.log("OTP Redis key:", otpKey);
 
-    // DO NOT LOG THE ACTUAL OTP IN PRODUCTION.
-
     // =====================================================
-    // 17. SEND OTP EMAIL
+    // 18. SEND OTP EMAIL
     // =====================================================
 
     try {
@@ -295,9 +463,10 @@ async function RegisterUserController(req, res) {
     } catch (emailError) {
       console.error("Registration OTP Email Error:", emailError);
 
-      // Clean temporary data if email fails.
+      // Clean temporary registration data
       await redisClient.del(registrationDataKey);
 
+      // Clean OTP data
       await redisClient.del(otpKey);
 
       return res.status(500).json({
@@ -307,7 +476,7 @@ async function RegisterUserController(req, res) {
     }
 
     // =====================================================
-    // 18. START RESEND COOLDOWN
+    // 19. START RESEND COOLDOWN
     // =====================================================
 
     await setResendCooldown({
@@ -316,7 +485,7 @@ async function RegisterUserController(req, res) {
     });
 
     // =====================================================
-    // 19. SUCCESS
+    // 20. SUCCESS
     // =====================================================
 
     return res.status(200).json({
@@ -371,7 +540,20 @@ async function LoginUserController(req, res) {
     const normalizedEmail = email.toString().trim().toLowerCase();
 
     // =====================================================
-    // 4. FIND USER
+    // 4. VALIDATE EMAIL FORMAT
+    // =====================================================
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address",
+      });
+    }
+
+    // =====================================================
+    // 5. FIND USER
     // =====================================================
 
     const user = await UserModel.findOne({
@@ -379,7 +561,7 @@ async function LoginUserController(req, res) {
     });
 
     // =====================================================
-    // 5. EMAIL CHECK
+    // 6. EMAIL CHECK
     // =====================================================
 
     if (!user) {
@@ -390,7 +572,7 @@ async function LoginUserController(req, res) {
     }
 
     // =====================================================
-    // 6. PASSWORD CHECK
+    // 7. PASSWORD CHECK
     // =====================================================
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -403,7 +585,7 @@ async function LoginUserController(req, res) {
     }
 
     // =====================================================
-    // 7. EMAIL VERIFICATION CHECK
+    // 8. EMAIL VERIFICATION CHECK
     // =====================================================
 
     if (user.isEmailVerified !== true) {
@@ -414,19 +596,19 @@ async function LoginUserController(req, res) {
     }
 
     // =====================================================
-    // 8. GENERATE JWT
+    // 9. GENERATE JWT
     // =====================================================
 
     const token = generateToken(user);
 
     // =====================================================
-    // 9. SET AUTH COOKIE
+    // 10. SET AUTH COOKIE
     // =====================================================
 
     setAuthCookie(res, token);
 
     // =====================================================
-    // 10. SUCCESS
+    // 11. SUCCESS
     // =====================================================
 
     return res.status(200).json({
@@ -588,6 +770,8 @@ module.exports = {
   LoginUserController,
   LogoutUserController,
   GetMeUserController,
+  CheckEmailController,
   generateToken,
   setAuthCookie,
+  isEmailDomainValid,
 };

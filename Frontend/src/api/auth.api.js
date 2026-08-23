@@ -1,4 +1,3 @@
-
 import axios from "axios";
 
 // =====================================================
@@ -26,11 +25,7 @@ export const registerUser = async (userData) => {
 // VERIFY REGISTRATION OTP
 // =====================================================
 
-export const verifyOTP = async ({
-  email,
-  otp,
-  purpose = "register",
-}) => {
+export const verifyOTP = async ({ email, otp, purpose = "register" }) => {
   const response = await API.post("/auth/verify-registration", {
     email,
     otp,
@@ -41,13 +36,10 @@ export const verifyOTP = async ({
 };
 
 // =====================================================
-// RESEND OTP
+// RESEND REGISTRATION OTP
 // =====================================================
 
-export const resendOTP = async ({
-  email,
-  purpose = "register",
-}) => {
+export const resendOTP = async ({ email, purpose = "register" }) => {
   const response = await API.post("/auth/resend-otp", {
     email,
     purpose,
@@ -71,7 +63,19 @@ export const loginUser = async (userData) => {
 
 export const forgotPassword = async ({ username }) => {
   const response = await API.post("/auth/forgot-password", {
-    username,
+    username: username.trim(),
+  });
+
+  return response.data;
+};
+
+// =====================================================
+// RESEND FORGOT PASSWORD OTP
+// =====================================================
+
+export const resendForgotPasswordOTP = async ({ username }) => {
+  const response = await API.post("/auth/resend-forgot-password-otp", {
+    username: username.trim(),
   });
 
   return response.data;
@@ -81,18 +85,14 @@ export const forgotPassword = async ({ username }) => {
 // VERIFY PASSWORD RESET OTP
 // =====================================================
 
-export const verifyPasswordOTP = async ({
-  username,
-  otp,
-}) => {
+export const verifyPasswordOTP = async ({ username, otp }) => {
   const response = await API.post("/auth/verify-password-otp", {
-    username,
-    otp,
+    username: username.trim(),
+    otp: otp.toString().trim(),
   });
 
   return response.data;
 };
-
 
 // =====================================================
 // RESET PASSWORD
@@ -103,12 +103,6 @@ export const resetPassword = async ({
   newPassword,
   confirmPassword,
 }) => {
-  console.log("RESET PASSWORD REQUEST:", {
-    resetToken,
-    newPassword,
-    confirmPassword,
-  });
-
   const response = await API.post("/auth/reset-password", {
     resetToken,
     newPassword,
@@ -118,7 +112,30 @@ export const resetPassword = async ({
   return response.data;
 };
 
+// =====================================================
+// FORGOT USER ID
+// =====================================================
 
+export const forgotUserId = async ({ email }) => {
+  const response = await API.post("/auth/forgot-user-id", {
+    email: email.trim(),
+  });
+
+  return response.data;
+};
+
+// =====================================================
+// VERIFY USER ID OTP
+// =====================================================
+
+export const verifyUserIdOTP = async ({ email, otp }) => {
+  const response = await API.post("/auth/verify-user-id", {
+    email: email.trim(),
+    otp: otp.toString().trim(),
+  });
+
+  return response.data;
+};
 
 // =====================================================
 // CHECK USERNAME
@@ -127,7 +144,21 @@ export const resetPassword = async ({
 export const checkUsername = async (username) => {
   const response = await API.get("/auth/check-username", {
     params: {
-      username,
+      username: username.trim(),
+    },
+  });
+
+  return response.data;
+};
+
+// =====================================================
+// CHECK EMAIL
+// =====================================================
+
+export const checkEmail = async (email) => {
+  const response = await API.get("/auth/check-email", {
+    params: {
+      email: email.trim(),
     },
   });
 
@@ -139,4 +170,3 @@ export const checkUsername = async (username) => {
 // =====================================================
 
 export default API;
-

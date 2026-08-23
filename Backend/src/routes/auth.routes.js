@@ -32,6 +32,8 @@ authRouter.post("/register", authController.RegisterUserController);
 
 authRouter.get("/check-username", CheckUsernameController);
 
+authRouter.get("/check-email", authController.CheckEmailController);
+
 authRouter.post("/verify-registration", VerifyRegistrationController);
 
 // ==========================================

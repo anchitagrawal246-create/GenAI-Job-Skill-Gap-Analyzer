@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FcGoogle } from "react-icons/fc";
 import { useTheme } from "../../../context/theme.context";
-
 import {
   FiEye,
   FiEyeOff,
@@ -18,7 +17,6 @@ import {
   FiAlertCircle,
   FiHome,
 } from "react-icons/fi";
-
 import { loginUser } from "../../../api/auth.api";
 
 const Login = () => {
@@ -70,10 +68,11 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Clear previous messages
     setError("");
     setSuccess("");
 
-    // Basic validation
+    // Validation
     if (!form.email.trim()) {
       setError("Email is required.");
       return;
@@ -87,6 +86,7 @@ const Login = () => {
     try {
       setLoading(true);
 
+      // Call backend login API
       const data = await loginUser({
         email: form.email.trim(),
         password: form.password,
@@ -94,53 +94,51 @@ const Login = () => {
 
       console.log("Login response:", data);
 
-      /*
-       * Depending on your backend response,
-       * token may be:
-       *
-       * data.token
-       * data.accessToken
-       * data.data.token
-       * data.data.accessToken
-       */
+      // ==========================================
+      // SUCCESSFUL LOGIN
+      // ==========================================
+      if (data?.success === true) {
+        console.log("Login successful");
 
-      const token =
-        data?.token ||
-        data?.accessToken ||
-        data?.data?.token ||
-        data?.data?.accessToken;
+        setSuccess(data.message || "Login successful.");
 
-      if (token) {
-        if (rememberMe) {
-          localStorage.setItem("token", token);
-
-          // Remove old session token if present
-          sessionStorage.removeItem("token");
-        } else {
-          sessionStorage.setItem("token", token);
-
-          // Remove old persistent token if present
-          localStorage.removeItem("token");
+        // Save logged-in user
+        if (data.user) {
+          localStorage.setItem("user", JSON.stringify(data.user));
         }
+
+        // If your backend sends a token
+        if (data.token) {
+          if (rememberMe) {
+            localStorage.setItem("token", data.token);
+          } else {
+            sessionStorage.setItem("token", data.token);
+          }
+        }
+
+        // Navigate to success page
+        setTimeout(() => {
+          navigate("/success", {
+            replace: true,
+          });
+        }, 700);
+
+        return;
       }
 
-      setSuccess(data?.message || "Login successful.");
-
-      // Small delay so success message can be seen
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 700);
+      // ==========================================
+      // LOGIN FAILED
+      // ==========================================
+      setError(data?.message || "Login failed.");
     } catch (err) {
       console.error("Login error:", err);
 
       const backendMessage =
         err?.response?.data?.message ||
         err?.response?.data?.error ||
-        err?.message;
+        "Unable to login. Please check your credentials.";
 
-      setError(
-        backendMessage || "Unable to login. Please check your credentials.",
-      );
+      setError(backendMessage);
     } finally {
       setLoading(false);
     }
@@ -152,14 +150,11 @@ const Login = () => {
   const handleGoogle = () => {
     console.log("Google login");
 
-    /*
-     * Add your Google OAuth endpoint here later.
-     *
-     * Example:
-     *
-     * window.location.href =
-     *   "http://localhost:3000/api/auth/google";
-     */
+    // Add Google OAuth endpoint here later.
+    // Example:
+    //
+    // window.location.href =
+    //   "http://localhost:3000/api/auth/google";
   };
 
   // ==============================
@@ -232,22 +227,17 @@ const Login = () => {
           darkMode ? "border-purple-500/10" : "border-purple-900/10"
         }`}
       >
-        {/* =========================================
-            CLICKABLE LOGO + SITE NAME
-        ========================================== */}
-
+        {/* Logo */}
         <button
           type="button"
           onClick={handleHome}
           aria-label="Go to home page"
           className="group flex items-center gap-3 text-left"
         >
-          {/* Logo */}
           <div className="flex h-9 w-9 items-center justify-center border-2 border-purple-500 bg-purple-600 shadow-[3px_3px_0px_#312e81] transition-all duration-200 group-hover:-translate-y-0.5 group-hover:shadow-[4px_4px_0px_#312e81]">
             <FiCpu size={17} />
           </div>
 
-          {/* Site Name */}
           <div>
             <p className="font-mono text-xs font-black tracking-[0.18em] transition-colors group-hover:text-purple-400">
               AI INTERVIEW
@@ -263,12 +253,9 @@ const Login = () => {
           </div>
         </button>
 
-        {/* =========================================
-            HEADER ACTIONS
-        ========================================== */}
-
+        {/* Header actions */}
         <div className="flex items-center gap-2">
-          {/* HOME BUTTON */}
+          {/* Home */}
           <button
             type="button"
             onClick={handleHome}
@@ -284,7 +271,7 @@ const Login = () => {
             <span className="hidden sm:inline">Home</span>
           </button>
 
-          {/* THEME BUTTON */}
+          {/* Theme */}
           <button
             type="button"
             onClick={toggleTheme}
@@ -473,7 +460,7 @@ const Login = () => {
                   : "border-black/15 bg-[#f8f5ec] shadow-[6px_6px_0px_#6d28d9]"
               }`}
             >
-              {/* Card header */}
+              {/* Card Header */}
               <div
                 className={`flex items-center justify-between border-b-2 px-5 py-2.5 ${
                   darkMode
@@ -494,7 +481,7 @@ const Login = () => {
                 </span>
               </div>
 
-              {/* Card body */}
+              {/* Card Body */}
               <div className="p-5 sm:p-6">
                 {/* Header */}
                 <div className="mb-4">
@@ -533,7 +520,10 @@ const Login = () => {
                   </p>
                 </div>
 
-                {/* Error */}
+                {/* =========================================
+                    ERROR MESSAGE
+                ========================================== */}
+
                 {error && (
                   <div
                     className={`mb-3 flex items-center gap-2 border-2 px-3 py-2 font-mono text-[9px] ${
@@ -547,20 +537,27 @@ const Login = () => {
                   </div>
                 )}
 
-                {/* Success */}
+                {/* =========================================
+                    SUCCESS MESSAGE
+                ========================================== */}
+
                 {success && (
                   <div
-                    className={`mb-3 border-2 px-3 py-2 font-mono text-[9px] ${
+                    className={`mb-3 flex items-center gap-2 border-2 px-3 py-2 font-mono text-[9px] ${
                       darkMode
                         ? "border-green-500/40 bg-green-500/10 text-green-300"
                         : "border-green-500/30 bg-green-50 text-green-600"
                     }`}
                   >
-                    ✓ {success}
+                    <FiCheck size={14} />
+                    <span>{success}</span>
                   </div>
                 )}
 
-                {/* Google */}
+                {/* =========================================
+                    GOOGLE LOGIN
+                ========================================== */}
+
                 <button
                   type="button"
                   onClick={handleGoogle}
@@ -586,7 +583,10 @@ const Login = () => {
                   <div className="h-[1px] flex-1 bg-purple-500/20" />
                 </div>
 
-                {/* FORM */}
+                {/* =========================================
+                    FORM
+                ========================================== */}
+
                 <form onSubmit={handleSubmit} className="space-y-3">
                   {/* EMAIL */}
                   <div>
@@ -633,7 +633,8 @@ const Login = () => {
                       <button
                         type="button"
                         onClick={handleForgotPassword}
-                        className="font-mono text-[8px] font-bold uppercase tracking-wider text-purple-500 transition hover:text-purple-400"
+                        disabled={loading}
+                        className="font-mono text-[8px] font-bold uppercase tracking-wider text-purple-500 transition hover:text-purple-400 disabled:opacity-50"
                       >
                         Forgot password?
                       </button>
@@ -672,6 +673,7 @@ const Login = () => {
                         aria-label={
                           showPassword ? "Hide password" : "Show password"
                         }
+                        disabled={loading}
                         className={`flex w-9 shrink-0 items-center justify-center border-l-2 border-inherit transition hover:text-purple-400 ${
                           darkMode ? "text-white/30" : "text-black/30"
                         }`}
@@ -738,7 +740,8 @@ const Login = () => {
                   <button
                     type="button"
                     onClick={handleRegister}
-                    className="group mt-1.5 inline-flex items-center gap-2 font-mono text-xs font-black uppercase tracking-wider text-purple-500 transition hover:text-purple-400"
+                    disabled={loading}
+                    className="group mt-1.5 inline-flex items-center gap-2 font-mono text-xs font-black uppercase tracking-wider text-purple-500 transition hover:text-purple-400 disabled:opacity-50"
                   >
                     Create profile
                     <FiArrowRight

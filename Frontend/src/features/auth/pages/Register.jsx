@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FcGoogle } from "react-icons/fc";
@@ -22,39 +22,43 @@ import {
   FiZap,
 } from "react-icons/fi";
 
-// =====================================================
-// API
-// =====================================================
-
 const API_URL = "http://localhost:3000/api/auth";
 
 // =====================================================
-// REGISTER COMPONENT
+// EMAIL VALIDATION
+// =====================================================
+
+const isValidEmailFormat = (email) => {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+};
+
+// =====================================================
+// REGISTER
 // =====================================================
 
 const Register = () => {
   const navigate = useNavigate();
   const { darkMode, toggleTheme } = useTheme();
 
-  // =====================================================
+  // ===================================================
   // OTP
-  // =====================================================
+  // ===================================================
 
   const [showOTPModal, setShowOTPModal] = useState(false);
   const [otpEmail, setOtpEmail] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
 
-  // =====================================================
-  // PASSWORD
-  // =====================================================
+  // ===================================================
+  // PASSWORD VISIBILITY
+  // ===================================================
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // =====================================================
+  // ===================================================
   // FORM
-  // =====================================================
+  // ===================================================
 
   const [form, setForm] = useState({
     username: "",
@@ -63,43 +67,38 @@ const Register = () => {
     confirmPassword: "",
   });
 
-  const [emailTouched, setEmailTouched] = useState(false);
+  // ===================================================
+  // TERMS
+  // ===================================================
 
-  // =====================================================
+  const [termsAccepted, setTermsAccepted] = useState(false);
+
+  // ===================================================
+  // EMAIL
+  // ===================================================
+
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailStatus, setEmailStatus] = useState("idle");
+  const [emailMessage, setEmailMessage] = useState("");
+
+  // ===================================================
   // USERNAME
-  // =====================================================
+  // ===================================================
 
   const [usernameStatus, setUsernameStatus] = useState("idle");
   const [usernameMessage, setUsernameMessage] = useState("");
 
-  // =====================================================
+  // ===================================================
   // GENERAL
-  // =====================================================
+  // ===================================================
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // =====================================================
-  // EMAIL VALIDATION
-  // =====================================================
-
-  const isValidEmail = (email) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
-  };
-
-  const emailIsValid =
-    form.email.length > 0 &&
-    isValidEmail(form.email.trim());
-
-  const emailIsInvalid =
-    emailTouched &&
-    form.email.length > 0 &&
-    !isValidEmail(form.email.trim());
-
-  // =====================================================
-  // USERNAME REALTIME AVAILABILITY
-  // =====================================================
+  // ===================================================
+  // USERNAME REALTIME CHECK
+  // ===================================================
 
   useEffect(() => {
     const username = form.username.trim();
@@ -112,16 +111,14 @@ const Register = () => {
 
     if (username.length < 3) {
       setUsernameStatus("idle");
-      setUsernameMessage(
-        "USERNAME MUST BE AT LEAST 3 CHARACTERS"
-      );
+      setUsernameMessage("USERNAME MUST BE AT LEAST 3 CHARACTERS");
       return;
     }
 
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {
       setUsernameStatus("unavailable");
       setUsernameMessage(
-        "USERNAME CAN ONLY CONTAIN LETTERS, NUMBERS AND UNDERSCORE"
+        "USERNAME CAN ONLY CONTAIN LETTERS, NUMBERS AND UNDERSCORE",
       );
       return;
     }
@@ -129,46 +126,116 @@ const Register = () => {
     setUsernameStatus("checking");
     setUsernameMessage("CHECKING USERNAME...");
 
+    const controller = new AbortController();
+
     const timeoutId = setTimeout(async () => {
       try {
-        const response = await axios.get(
-          `${API_URL}/check-username`,
-          {
-            params: {
-              username,
-            },
-          }
-        );
+        const response = await axios.get(`${API_URL}/check-username`, {
+          params: {
+            username,
+          },
+          signal: controller.signal,
+        });
 
-        if (response.data?.available) {
+        if (response.data?.available === true) {
           setUsernameStatus("available");
-          setUsernameMessage("USERNAME AVAILABLE");
+          setUsernameMessage(response.data?.message || "USERNAME AVAILABLE");
         } else {
           setUsernameStatus("unavailable");
           setUsernameMessage(
-            response.data?.message ||
-              "USERNAME ALREADY EXISTS"
+            response.data?.message || "USERNAME ALREADY EXISTS",
           );
         }
       } catch (err) {
-        console.error(
-          "Username availability error:",
-          err
-        );
+        if (err.name === "CanceledError" || err.code === "ERR_CANCELED") {
+          return;
+        }
+
+        console.error("Username availability error:", err);
 
         setUsernameStatus("error");
         setUsernameMessage(
-          "COULD NOT CHECK USERNAME"
+          err.response?.data?.message ||
+            err.response?.data?.error ||
+            "COULD NOT CHECK USERNAME",
         );
       }
     }, 500);
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [form.username]);
 
-  // =====================================================
-  // HANDLE CHANGE
-  // =====================================================
+  // ===================================================
+  // EMAIL REALTIME CHECK
+  // ===================================================
+
+  useEffect(() => {
+    const email = form.email.trim().toLowerCase();
+
+    if (!email) {
+      setEmailStatus("idle");
+      setEmailMessage("");
+      return;
+    }
+
+    if (!isValidEmailFormat(email)) {
+      setEmailStatus("invalid");
+      setEmailMessage("PLEASE ENTER A VALID EMAIL ADDRESS");
+      return;
+    }
+
+    setEmailStatus("checking");
+    setEmailMessage("VALIDATING EMAIL...");
+
+    const controller = new AbortController();
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await axios.get(`${API_URL}/check-email`, {
+          params: {
+            email,
+          },
+          signal: controller.signal,
+        });
+
+        const valid = response.data?.valid;
+        const available = response.data?.available;
+
+        if (valid === true && available === true) {
+          setEmailStatus("valid");
+          setEmailMessage(response.data?.message || "EMAIL AVAILABLE");
+        } else {
+          setEmailStatus("invalid");
+          setEmailMessage(response.data?.message || "EMAIL IS NOT AVAILABLE");
+        }
+      } catch (err) {
+        if (err.name === "CanceledError" || err.code === "ERR_CANCELED") {
+          return;
+        }
+
+        console.error("Email validation error:", err);
+
+        setEmailStatus("invalid");
+        setEmailMessage(
+          err.response?.data?.message ||
+            err.response?.data?.error ||
+            "COULD NOT VALIDATE EMAIL",
+        );
+      }
+    }, 500);
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [form.email]);
+
+  // ===================================================
+  // HANDLE INPUT
+  // ===================================================
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -178,22 +245,17 @@ const Register = () => {
       [name]: value,
     }));
 
-    if (error) {
-      setError("");
-    }
-
-    if (success) {
-      setSuccess("");
-    }
+    setError("");
+    setSuccess("");
 
     if (name === "email") {
       setEmailTouched(true);
     }
   };
 
-  // =====================================================
-  // PASSWORD MATCHING
-  // =====================================================
+  // ===================================================
+  // PASSWORD MATCH
+  // ===================================================
 
   const passwordsMatch =
     form.password.length > 0 &&
@@ -201,12 +263,11 @@ const Register = () => {
     form.password === form.confirmPassword;
 
   const passwordsDoNotMatch =
-    form.confirmPassword.length > 0 &&
-    form.password !== form.confirmPassword;
+    form.confirmPassword.length > 0 && form.password !== form.confirmPassword;
 
-  // =====================================================
+  // ===================================================
   // PASSWORD STRENGTH
-  // =====================================================
+  // ===================================================
 
   const passwordChecks = {
     length: form.password.length >= 8,
@@ -216,14 +277,22 @@ const Register = () => {
     special: /[^A-Za-z0-9]/.test(form.password),
   };
 
-  const passwordStrength =
-    Object.values(passwordChecks).filter(Boolean).length;
+  const passwordStrength = Object.values(passwordChecks).filter(Boolean).length;
 
   const isStrongPassword = passwordStrength >= 4;
 
-  // =====================================================
+  // ===================================================
+  // TERMS CHANGE
+  // ===================================================
+
+  const handleTermsChange = (e) => {
+    setTermsAccepted(e.target.checked);
+    setError("");
+  };
+
+  // ===================================================
   // REGISTER
-  // =====================================================
+  // ===================================================
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -234,9 +303,18 @@ const Register = () => {
     const username = form.username.trim();
     const email = form.email.trim().toLowerCase();
 
-    // ===================================================
-    // USERNAME VALIDATION
-    // ===================================================
+    // =================================================
+    // TERMS FIRST
+    // =================================================
+
+    if (!termsAccepted) {
+      setError("Please accept the Terms & Conditions and Privacy Policy.");
+      return;
+    }
+
+    // =================================================
+    // USERNAME
+    // =================================================
 
     if (!username) {
       setError("Username is required.");
@@ -244,54 +322,58 @@ const Register = () => {
     }
 
     if (username.length < 3) {
-      setError(
-        "Username must contain at least 3 characters."
-      );
+      setError("Username must contain at least 3 characters.");
       return;
     }
 
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      setError(
-        "Username can only contain letters, numbers and underscore."
-      );
+      setError("Username can only contain letters, numbers and underscore.");
       return;
     }
 
     if (usernameStatus === "checking") {
-      setError(
-        "Please wait while we check username availability."
-      );
+      setError("Please wait while we check username availability.");
       return;
     }
 
     if (usernameStatus !== "available") {
-      setError(
-        "Please choose an available username."
-      );
+      setError("Please choose an available username.");
       return;
     }
 
-    // ===================================================
+    // =================================================
     // EMAIL
-    // ===================================================
+    // =================================================
 
     if (!email) {
       setEmailTouched(true);
+      setEmailStatus("invalid");
+      setEmailMessage("EMAIL IS REQUIRED");
       setError("Email is required.");
       return;
     }
 
-    if (!isValidEmail(email)) {
+    if (!isValidEmailFormat(email)) {
       setEmailTouched(true);
-      setError(
-        "Please enter a valid email address."
-      );
+      setEmailStatus("invalid");
+      setEmailMessage("PLEASE ENTER A VALID EMAIL ADDRESS");
+      setError("Please enter a valid email address.");
       return;
     }
 
-    // ===================================================
+    if (emailStatus === "checking") {
+      setError("Please wait while we validate your email.");
+      return;
+    }
+
+    if (emailStatus !== "valid") {
+      setError(emailMessage || "Please enter a valid available email.");
+      return;
+    }
+
+    // =================================================
     // PASSWORD
-    // ===================================================
+    // =================================================
 
     if (!form.password) {
       setError("Password is required.");
@@ -310,14 +392,14 @@ const Register = () => {
 
     if (!isStrongPassword) {
       setError(
-        "Password must contain at least 8 characters, uppercase, lowercase, number and special character."
+        "Password must contain at least 8 characters, uppercase, lowercase, number and special character.",
       );
       return;
     }
 
-    // ===================================================
-    // REGISTER REQUEST
-    // ===================================================
+    // =================================================
+    // API REQUEST
+    // =================================================
 
     try {
       setLoading(true);
@@ -328,100 +410,57 @@ const Register = () => {
         password: form.password,
       };
 
-      console.log(
-        "Sending registration request:",
-        {
-          username,
-          email,
-        }
-      );
+      console.log("REGISTER REQUEST:", {
+        username,
+        email,
+      });
 
-      const response = await axios.post(
-        `${API_URL}/register`,
-        registerData,
-        {
-          withCredentials: true,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await axios.post(`${API_URL}/register`, registerData, {
+        withCredentials: true,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-      console.log(
-        "Registration response:",
-        response.data
-      );
-
-      // =================================================
-      // OPEN OTP MODAL
-      // =================================================
+      console.log("REGISTER RESPONSE:", response.data);
 
       setOtpEmail(email);
       setOtpError("");
       setShowOTPModal(true);
 
-      setSuccess(
-        response.data?.message ||
-          "OTP sent successfully!"
-      );
+      setSuccess(response.data?.message || "OTP sent successfully!");
     } catch (err) {
-      console.error(
-        "Registration error:",
-        err
-      );
+      console.error("Registration error:", err);
+      console.error("Registration server response:", err.response?.data);
 
-      if (err.response) {
-        setError(
-          err.response.data?.message ||
-            err.response.data?.error ||
-            "Registration failed."
-        );
-      } else if (err.request) {
-        setError(
-          "Cannot connect to server. Make sure your backend is running."
-        );
-      } else {
-        setError(
-          "Something went wrong. Please try again."
-        );
-      }
+      const serverMessage =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        "Registration failed.";
+
+      setError(serverMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  // =====================================================
-  // VERIFY REGISTRATION OTP
-  // =====================================================
+  // ===================================================
+  // VERIFY OTP
+  // ===================================================
 
   const handleVerifyOTP = async (otp) => {
     try {
       setOtpLoading(true);
       setOtpError("");
 
-      const cleanOTP = String(otp)
-        .replace(/\D/g, "")
-        .trim();
+      const cleanOTP = String(otp).replace(/\D/g, "").trim();
 
       if (cleanOTP.length !== 6) {
-        setOtpError(
-          "Please enter the complete 6-digit OTP."
-        );
+        setOtpError("Please enter the complete 6-digit OTP.");
         return;
       }
 
-      const email = otpEmail
-        .trim()
-        .toLowerCase();
-
-      console.log(
-        "Verifying registration OTP:",
-        {
-          email,
-          otp: cleanOTP,
-          purpose: "REGISTER",
-        }
-      );
+      const email = otpEmail.trim().toLowerCase();
 
       const response = await axios.post(
         `${API_URL}/verify-registration`,
@@ -435,13 +474,10 @@ const Register = () => {
           headers: {
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
-      console.log(
-        "OTP verification response:",
-        response.data
-      );
+      console.log("OTP VERIFICATION RESPONSE:", response.data);
 
       setOtpError("");
       setShowOTPModal(false);
@@ -454,15 +490,8 @@ const Register = () => {
         },
       });
     } catch (err) {
-      console.error(
-        "OTP verification error:",
-        err
-      );
-
-      console.error(
-        "OTP verification response:",
-        err.response?.data
-      );
+      console.error("OTP verification error:", err);
+      console.error("OTP server response:", err.response?.data);
 
       const message =
         err.response?.data?.message ||
@@ -475,64 +504,62 @@ const Register = () => {
     }
   };
 
-  // =====================================================
+  // ===================================================
   // RESEND OTP
-  // =====================================================
+  // ===================================================
 
- const handleResendOTP = async () => {
-   try {
-     setOtpError("");
+  const handleResendOTP = async () => {
+    try {
+      setOtpError("");
 
-     const email = otpEmail.trim().toLowerCase();
+      const username = form.username.trim();
+      const email = otpEmail.trim().toLowerCase();
 
-     console.log("Resending registration OTP:", {
-       username: form.username.trim(),
-       email,
-       purpose: "REGISTER",
-     });
+      const response = await axios.post(
+        `${API_URL}/register`,
+        {
+          username,
+          email,
+          password: form.password,
+        },
+        {
+          withCredentials: true,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
 
-     const response = await axios.post(
-       `${API_URL}/register`,
-       {
-         username: form.username.trim(),
-         email,
-         password: form.password,
-       },
-       {
-         withCredentials: true,
-         headers: {
-           "Content-Type": "application/json",
-         },
-       },
-     );
+      console.log("RESEND OTP RESPONSE:", response.data);
 
-     console.log("Resend OTP response:", response.data);
+      setSuccess(response.data?.message || "OTP sent successfully!");
 
-     return response.data;
-   } catch (err) {
-     console.error("Resend OTP error:", err);
+      return response.data;
+    } catch (err) {
+      console.error("Resend OTP error:", err);
 
-     const message =
-       err.response?.data?.message ||
-       err.response?.data?.error ||
-       "Unable to resend OTP.";
+      const message =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        "Unable to resend OTP.";
 
-     setOtpError(message);
-     throw err;
-   }
- };
+      setOtpError(message);
 
-  // =====================================================
+      throw err;
+    }
+  };
+
+  // ===================================================
   // GOOGLE
-  // =====================================================
+  // ===================================================
 
   const handleGoogle = () => {
     console.log("Google registration");
   };
 
-  // =====================================================
+  // ===================================================
   // NAVIGATION
-  // =====================================================
+  // ===================================================
 
   const handleHome = () => {
     navigate("/");
@@ -542,64 +569,47 @@ const Register = () => {
     navigate("/login");
   };
 
-  // =====================================================
-  // BUTTON DISABLED
-  // =====================================================
+  // ===================================================
+  // BUTTON STATE
+  // ===================================================
 
   const isButtonDisabled =
-    loading ||
-    usernameStatus === "checking" ||
-    usernameStatus === "unavailable" ||
-    usernameStatus === "error" ||
-    (form.password.length > 0 &&
-      form.confirmPassword.length > 0 &&
-      (!passwordsMatch ||
-        !isStrongPassword));
+    loading || usernameStatus === "checking" || emailStatus === "checking";
 
-  // =====================================================
+  // ===================================================
   // UI
-  // =====================================================
+  // ===================================================
 
   return (
     <main
-      className={`min-h-screen w-full overflow-hidden transition-colors duration-500 ${
-        darkMode
-          ? "bg-[#08070b] text-[#f4f0df]"
-          : "bg-[#eee9dc] text-[#17131f]"
+      className={`min-h-screen w-full overflow-hidden transition-all duration-500 ease-in-out ${
+        darkMode ? "bg-[#08070b] text-[#f4f0df]" : "bg-[#eee9dc] text-[#17131f]"
       }`}
     >
       {/* BACKGROUND */}
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div
-          className={`absolute -left-52 -top-52 h-[500px] w-[500px] rounded-full blur-[150px] ${
-            darkMode
-              ? "bg-purple-700/15"
-              : "bg-purple-400/15"
+          className={`absolute -left-52 -top-52 h-[500px] w-[500px] rounded-full blur-[150px] transition-all duration-1000 ${
+            darkMode ? "bg-purple-700/15" : "bg-purple-400/15"
           }`}
         />
 
         <div
-          className={`absolute -right-52 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] ${
-            darkMode
-              ? "bg-indigo-700/10"
-              : "bg-indigo-400/10"
+          className={`absolute -right-52 top-1/3 h-[500px] w-[500px] rounded-full blur-[150px] transition-all duration-1000 ${
+            darkMode ? "bg-indigo-700/10" : "bg-indigo-400/10"
           }`}
         />
 
         <div
-          className={`absolute bottom-[-200px] left-1/3 h-[450px] w-[450px] rounded-full blur-[150px] ${
-            darkMode
-              ? "bg-fuchsia-700/10"
-              : "bg-fuchsia-400/10"
+          className={`absolute bottom-[-200px] left-1/3 h-[450px] w-[450px] rounded-full blur-[150px] transition-all duration-1000 ${
+            darkMode ? "bg-fuchsia-700/10" : "bg-fuchsia-400/10"
           }`}
         />
 
         <div
           className={`absolute inset-0 ${
-            darkMode
-              ? "opacity-[0.035]"
-              : "opacity-[0.045]"
+            darkMode ? "opacity-[0.035]" : "opacity-[0.045]"
           }`}
           style={{
             backgroundImage: `
@@ -614,19 +624,17 @@ const Register = () => {
       {/* HEADER */}
 
       <header
-        className={`relative z-30 mx-auto flex h-16 max-w-[1600px] items-center justify-between border-b px-5 sm:px-8 lg:px-14 xl:px-20 ${
-          darkMode
-            ? "border-purple-500/10"
-            : "border-purple-900/10"
+        className={`relative z-30 mx-auto flex h-16 max-w-[1600px] items-center justify-between border-b px-5 transition-colors duration-500 sm:px-8 lg:px-14 xl:px-20 ${
+          darkMode ? "border-purple-500/10" : "border-purple-900/10"
         }`}
       >
         <button
           type="button"
           onClick={handleHome}
-          className="group flex items-center gap-3"
           aria-label="Go to home page"
+          className="group flex items-center gap-3"
         >
-          <div className="flex h-9 w-9 items-center justify-center border-2 border-purple-500 bg-purple-600 shadow-[3px_3px_0px_#312e81] transition-transform group-hover:-translate-y-0.5">
+          <div className="flex h-9 w-9 items-center justify-center border-2 border-purple-500 bg-purple-600 shadow-[3px_3px_0px_#312e81] transition-all duration-300 group-hover:-translate-y-0.5 group-hover:shadow-[4px_4px_0px_#312e81]">
             <FiCpu size={17} />
           </div>
 
@@ -636,10 +644,8 @@ const Register = () => {
             </p>
 
             <p
-              className={`font-mono text-[8px] tracking-[0.25em] ${
-                darkMode
-                  ? "text-white/30"
-                  : "text-black/40"
+              className={`font-mono text-[8px] tracking-[0.25em] transition-colors ${
+                darkMode ? "text-white/30" : "text-black/40"
               }`}
             >
               CANDIDATE PORTAL
@@ -651,7 +657,7 @@ const Register = () => {
           <button
             type="button"
             onClick={handleHome}
-            className={`flex h-9 items-center gap-2 border-2 px-3 font-mono text-[8px] font-bold uppercase tracking-wider transition-all ${
+            className={`flex h-9 items-center gap-2 border-2 px-3 font-mono text-[8px] font-bold uppercase tracking-wider transition-all duration-300 ${
               darkMode
                 ? "border-[#302c38] bg-[#15131a] text-white/70 hover:border-purple-500 hover:bg-purple-500/10 hover:text-white"
                 : "border-black/15 bg-white/70 text-black/60 hover:border-purple-500 hover:text-purple-700"
@@ -665,17 +671,13 @@ const Register = () => {
             type="button"
             onClick={toggleTheme}
             aria-label="Toggle theme"
-            className={`flex h-9 w-9 items-center justify-center border-2 transition-all duration-300 ${
+            className={`flex h-9 w-9 items-center justify-center border-2 transition-all duration-300 hover:rotate-12 ${
               darkMode
-                ? "border-[#302c38] bg-[#15131a] text-yellow-300 hover:border-purple-500 hover:bg-purple-500/10"
+                ? "border-[#302c38] bg-[#15131a] text-yellow-300 hover:border-purple-500"
                 : "border-black/15 bg-white/70 text-purple-700 hover:border-purple-500"
             }`}
           >
-            {darkMode ? (
-              <FiSun size={16} />
-            ) : (
-              <FiMoon size={16} />
-            )}
+            {darkMode ? <FiSun size={16} /> : <FiMoon size={16} />}
           </button>
         </div>
       </header>
@@ -711,7 +713,7 @@ const Register = () => {
           <div className="w-full max-w-3xl">
             <div className="mb-4">
               <div
-                className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[8px] tracking-[0.2em] ${
+                className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[8px] tracking-[0.2em] transition-all duration-500 ${
                   darkMode
                     ? "border-purple-500/25 bg-purple-500/5 text-purple-300"
                     : "border-purple-500/25 bg-purple-500/10 text-purple-700"
@@ -725,26 +727,21 @@ const Register = () => {
             <h1 className="font-mono text-5xl font-black uppercase leading-[0.9] tracking-tight xl:text-6xl">
               Start your
               <br />
-              <span className="text-purple-500">
-                journey.
-              </span>
+              <span className="text-purple-500">journey.</span>
             </h1>
 
             <p
-              className={`mt-4 max-w-xl font-mono text-xs leading-5 xl:text-sm ${
-                darkMode
-                  ? "text-white/40"
-                  : "text-black/55"
+              className={`mt-4 max-w-xl font-mono text-xs leading-5 transition-colors xl:text-sm ${
+                darkMode ? "text-white/40" : "text-black/55"
               }`}
             >
-              Create your candidate profile and unlock
-              intelligent interview preparation,
-              personalized practice sessions, progress
-              tracking, and career-focused insights.
+              Create your candidate profile and unlock intelligent interview
+              preparation, personalized practice sessions, progress tracking,
+              and career-focused insights.
             </p>
 
             <div
-              className={`mt-5 max-w-xl border-2 px-4 py-3 font-mono ${
+              className={`mt-5 max-w-xl border-2 px-4 py-3 font-mono transition-all duration-500 ${
                 darkMode
                   ? "border-[#292630] bg-[#0d0c11]"
                   : "border-black/10 bg-white/60"
@@ -752,24 +749,16 @@ const Register = () => {
             >
               <p
                 className={`text-[10px] ${
-                  darkMode
-                    ? "text-white/30"
-                    : "text-black/40"
+                  darkMode ? "text-white/30" : "text-black/40"
                 }`}
               >
                 ~/candidate
               </p>
 
               <p className="mt-1.5 text-xs">
-                <span className="text-purple-400">
-                  $
-                </span>{" "}
-                <span className="text-purple-400">
-                  initialize
-                </span>{" "}
-                <span className="text-green-400">
-                  --profile
-                </span>
+                <span className="text-purple-400">$</span>{" "}
+                <span className="text-purple-400">initialize</span>{" "}
+                <span className="text-green-400">--profile</span>
               </p>
 
               <p className="mt-1.5 text-[10px] text-green-400">
@@ -810,7 +799,7 @@ const Register = () => {
         <section className="flex min-h-0 w-full items-center justify-center">
           <div className="w-full max-w-[450px]">
             <div
-              className={`border-2 transition-colors duration-500 ${
+              className={`border-2 transition-all duration-500 ${
                 darkMode
                   ? "border-[#2b2735] bg-[#111014] shadow-[6px_6px_0px_#5b21b6]"
                   : "border-black/15 bg-[#f8f5ec] shadow-[6px_6px_0px_#6d28d9]"
@@ -831,16 +820,14 @@ const Register = () => {
 
                 <span
                   className={`font-mono text-[7px] tracking-widest ${
-                    darkMode
-                      ? "text-white/25"
-                      : "text-black/30"
+                    darkMode ? "text-white/25" : "text-black/30"
                   }`}
                 >
                   NEW ACCOUNT
                 </span>
               </div>
 
-              {/* CARD BODY */}
+              {/* BODY */}
 
               <div className="px-5 py-3">
                 <div className="mb-3">
@@ -858,9 +845,7 @@ const Register = () => {
 
                       <p
                         className={`font-mono text-[6px] ${
-                          darkMode
-                            ? "text-white/25"
-                            : "text-black/35"
+                          darkMode ? "text-white/25" : "text-black/35"
                         }`}
                       >
                         CREATE YOUR ACCOUNT
@@ -869,21 +854,15 @@ const Register = () => {
                   </div>
 
                   <h2 className="font-mono text-xl font-black uppercase">
-                    Create{" "}
-                    <span className="text-purple-500">
-                      profile.
-                    </span>
+                    Create <span className="text-purple-500">profile.</span>
                   </h2>
 
                   <p
                     className={`mt-0.5 font-mono text-[8px] leading-3 ${
-                      darkMode
-                        ? "text-white/35"
-                        : "text-black/45"
+                      darkMode ? "text-white/35" : "text-black/45"
                     }`}
                   >
-                    Create your candidate account to
-                    start preparing.
+                    Create your candidate account to start preparing.
                   </p>
                 </div>
 
@@ -892,7 +871,7 @@ const Register = () => {
                 <button
                   type="button"
                   onClick={handleGoogle}
-                  className={`flex h-8 w-full items-center justify-center gap-3 border-2 font-mono text-[8px] font-bold uppercase tracking-wide transition ${
+                  className={`flex h-8 w-full items-center justify-center gap-3 border-2 font-mono text-[8px] font-bold uppercase tracking-wide transition-all duration-300 ${
                     darkMode
                       ? "border-[#302c38] bg-[#18161d] hover:border-purple-500 hover:bg-purple-500/10"
                       : "border-black/15 bg-white hover:border-purple-500 hover:bg-purple-500/5"
@@ -904,20 +883,15 @@ const Register = () => {
 
                 <div className="my-2 flex items-center gap-3">
                   <div className="h-[1px] flex-1 bg-purple-500/20" />
-
                   <span className="font-mono text-[6px] text-purple-400/50">
                     OR
                   </span>
-
                   <div className="h-[1px] flex-1 bg-purple-500/20" />
                 </div>
 
                 {/* FORM */}
 
-                <form
-                  onSubmit={handleSubmit}
-                  className="space-y-2"
-                >
+                <form onSubmit={handleSubmit} className="space-y-2">
                   {/* USERNAME */}
 
                   <div>
@@ -931,9 +905,7 @@ const Register = () => {
                       icon={<FiUser size={13} />}
                       darkMode={darkMode}
                       autoComplete="username"
-                      isValid={
-                        usernameStatus === "available"
-                      }
+                      isValid={usernameStatus === "available"}
                       isInvalid={
                         usernameStatus === "unavailable" ||
                         usernameStatus === "error"
@@ -941,42 +913,10 @@ const Register = () => {
                     />
 
                     {form.username.trim().length > 0 && (
-                      <div
-                        className={`mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold ${
-                          usernameStatus === "available"
-                            ? "text-green-400"
-                            : usernameStatus ===
-                                "unavailable"
-                              ? "text-red-400"
-                              : usernameStatus ===
-                                  "checking"
-                                ? "text-yellow-400"
-                                : usernameStatus ===
-                                    "error"
-                                  ? "text-red-400"
-                                  : darkMode
-                                    ? "text-white/30"
-                                    : "text-black/40"
-                        }`}
-                      >
-                        {usernameStatus ===
-                          "checking" && (
-                          <span className="h-2 w-2 animate-spin rounded-full border border-yellow-400/30 border-t-yellow-400" />
-                        )}
-
-                        {usernameStatus ===
-                          "available" && (
-                          <FiCheck size={8} />
-                        )}
-
-                        {(usernameStatus ===
-                          "unavailable" ||
-                          usernameStatus === "error") && (
-                          <FiX size={8} />
-                        )}
-
-                        {usernameMessage}
-                      </div>
+                      <StatusMessage
+                        status={usernameStatus}
+                        message={usernameMessage}
+                      />
                     )}
                   </div>
 
@@ -988,270 +928,188 @@ const Register = () => {
                       name="email"
                       value={form.email}
                       onChange={handleChange}
-                      onBlur={() =>
-                        setEmailTouched(true)
-                      }
+                      onBlur={() => setEmailTouched(true)}
                       type="email"
                       placeholder="candidate@email.com"
                       icon={<FiMail size={13} />}
                       darkMode={darkMode}
                       autoComplete="email"
-                      isValid={emailIsValid}
-                      isInvalid={emailIsInvalid}
+                      isValid={emailTouched && emailStatus === "valid"}
+                      isInvalid={emailTouched && emailStatus === "invalid"}
                     />
 
-                    {emailIsValid && (
-                      <div className="mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold text-green-400">
-                        <FiCheck size={8} />
-                        VALID EMAIL
-                      </div>
+                    {emailTouched &&
+                      form.email.trim().length > 0 &&
+                      emailStatus === "checking" && (
+                        <StatusMessage
+                          status="checking"
+                          message={emailMessage || "VALIDATING EMAIL..."}
+                        />
+                      )}
+
+                    {emailTouched && emailStatus === "valid" && (
+                      <StatusMessage
+                        status="available"
+                        message={emailMessage || "EMAIL ACCEPTED"}
+                      />
                     )}
 
-                    {emailIsInvalid && (
-                      <div className="mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold text-red-400">
-                        <FiX size={8} />
-                        ENTER A VALID EMAIL ADDRESS
-                      </div>
+                    {emailTouched && emailStatus === "invalid" && (
+                      <StatusMessage
+                        status="unavailable"
+                        message={emailMessage || "EMAIL REJECTED"}
+                      />
                     )}
                   </div>
 
                   {/* PASSWORD */}
 
-                  <div>
-                    <label className="mb-0.5 block font-mono text-[7px] font-bold uppercase tracking-widest opacity-60">
-                      Password
-                    </label>
+                  <PasswordField
+                    label="Password"
+                    name="password"
+                    value={form.password}
+                    onChange={handleChange}
+                    showPassword={showPassword}
+                    setShowPassword={setShowPassword}
+                    placeholder="Create password"
+                    darkMode={darkMode}
+                  />
 
-                    <div
-                      className={`flex h-8 border-2 transition focus-within:border-purple-500 ${
-                        darkMode
-                          ? "border-[#302c38] bg-[#0b0a0e]"
-                          : "border-black/15 bg-white"
-                      }`}
-                    >
-                      <div className="flex w-8 shrink-0 items-center justify-center border-r-2 border-inherit text-purple-400">
-                        <FiLock size={13} />
+                  {/* PASSWORD STRENGTH */}
+
+                  {form.password.length > 0 && (
+                    <div className="mt-1">
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((level) => (
+                          <div
+                            key={level}
+                            className={`h-[3px] flex-1 transition-all duration-300 ${
+                              passwordStrength >= level
+                                ? "bg-purple-500"
+                                : darkMode
+                                  ? "bg-white/10"
+                                  : "bg-black/10"
+                            }`}
+                          />
+                        ))}
                       </div>
 
-                      <input
-                        name="password"
-                        value={form.password}
-                        onChange={handleChange}
-                        type={
-                          showPassword
-                            ? "text"
-                            : "password"
-                        }
-                        placeholder="Create password"
-                        required
-                        autoComplete="new-password"
-                        className={`min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[9px] outline-none ${
-                          darkMode
-                            ? "text-white placeholder:text-white/20"
-                            : "text-black placeholder:text-black/25"
-                        }`}
-                      />
+                      <div className="mt-1 grid grid-cols-3 gap-x-2">
+                        <PasswordRequirement
+                          valid={passwordChecks.length}
+                          text="8+ CHARS"
+                          darkMode={darkMode}
+                        />
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShowPassword(
-                            (prev) => !prev
-                          )
-                        }
-                        className={`flex w-8 shrink-0 items-center justify-center border-l-2 border-inherit ${
-                          darkMode
-                            ? "text-white/30"
-                            : "text-black/30"
-                        }`}
-                      >
-                        {showPassword ? (
-                          <FiEyeOff size={13} />
-                        ) : (
-                          <FiEye size={13} />
-                        )}
-                      </button>
+                        <PasswordRequirement
+                          valid={passwordChecks.uppercase}
+                          text="UPPERCASE"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.lowercase}
+                          text="LOWERCASE"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.number}
+                          text="NUMBER"
+                          darkMode={darkMode}
+                        />
+
+                        <PasswordRequirement
+                          valid={passwordChecks.special}
+                          text="SPECIAL"
+                          darkMode={darkMode}
+                        />
+                      </div>
                     </div>
-
-                    {form.password.length > 0 && (
-                      <div className="mt-1">
-                        <div className="flex gap-1">
-                          {[1, 2, 3, 4, 5].map(
-                            (level) => (
-                              <div
-                                key={level}
-                                className={`h-[3px] flex-1 ${
-                                  passwordStrength >=
-                                  level
-                                    ? "bg-purple-500"
-                                    : darkMode
-                                      ? "bg-white/10"
-                                      : "bg-black/10"
-                                }`}
-                              />
-                            )
-                          )}
-                        </div>
-
-                        <div className="mt-1 grid grid-cols-3 gap-x-2">
-                          <PasswordRequirement
-                            valid={
-                              passwordChecks.length
-                            }
-                            text="8+ CHARS"
-                            darkMode={darkMode}
-                          />
-
-                          <PasswordRequirement
-                            valid={
-                              passwordChecks.uppercase
-                            }
-                            text="UPPERCASE"
-                            darkMode={darkMode}
-                          />
-
-                          <PasswordRequirement
-                            valid={
-                              passwordChecks.lowercase
-                            }
-                            text="LOWERCASE"
-                            darkMode={darkMode}
-                          />
-
-                          <PasswordRequirement
-                            valid={
-                              passwordChecks.number
-                            }
-                            text="NUMBER"
-                            darkMode={darkMode}
-                          />
-
-                          <PasswordRequirement
-                            valid={
-                              passwordChecks.special
-                            }
-                            text="SPECIAL"
-                            darkMode={darkMode}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  )}
 
                   {/* CONFIRM PASSWORD */}
 
                   <div>
-                    <label className="mb-0.5 block font-mono text-[7px] font-bold uppercase tracking-widest opacity-60">
-                      Confirm Password
-                    </label>
-
-                    <div
-                      className={`flex h-8 border-2 transition ${
-                        passwordsDoNotMatch
-                          ? "border-red-500"
-                          : passwordsMatch
-                            ? "border-green-500"
-                            : darkMode
-                              ? "border-[#302c38]"
-                              : "border-black/15"
-                      } ${
-                        darkMode
-                          ? "bg-[#0b0a0e]"
-                          : "bg-white"
-                      }`}
-                    >
-                      <div
-                        className={`flex w-8 shrink-0 items-center justify-center border-r-2 border-inherit ${
-                          passwordsDoNotMatch
-                            ? "text-red-400"
-                            : passwordsMatch
-                              ? "text-green-400"
-                              : "text-purple-400"
-                        }`}
-                      >
-                        <FiLock size={13} />
-                      </div>
-
-                      <input
-                        name="confirmPassword"
-                        value={form.confirmPassword}
-                        onChange={handleChange}
-                        type={
-                          showConfirmPassword
-                            ? "text"
-                            : "password"
-                        }
-                        placeholder="Confirm password"
-                        required
-                        autoComplete="new-password"
-                        className={`min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[9px] outline-none ${
-                          darkMode
-                            ? "text-white placeholder:text-white/20"
-                            : "text-black placeholder:text-black/25"
-                        }`}
-                      />
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShowConfirmPassword(
-                            (prev) => !prev
-                          )
-                        }
-                        className={`flex w-8 shrink-0 items-center justify-center border-l-2 border-inherit ${
-                          darkMode
-                            ? "text-white/30"
-                            : "text-black/30"
-                        }`}
-                      >
-                        {showConfirmPassword ? (
-                          <FiEyeOff size={13} />
-                        ) : (
-                          <FiEye size={13} />
-                        )}
-                      </button>
-                    </div>
+                    <PasswordField
+                      label="Confirm Password"
+                      name="confirmPassword"
+                      value={form.confirmPassword}
+                      onChange={handleChange}
+                      showPassword={showConfirmPassword}
+                      setShowPassword={setShowConfirmPassword}
+                      placeholder="Confirm password"
+                      darkMode={darkMode}
+                      isValid={passwordsMatch}
+                      isInvalid={passwordsDoNotMatch}
+                    />
 
                     {passwordsMatch && (
-                      <div className="mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold text-green-400">
-                        <FiCheck size={8} />
-                        PASSWORDS MATCH
-                      </div>
+                      <StatusMessage
+                        status="available"
+                        message="PASSWORDS MATCH"
+                      />
                     )}
 
                     {passwordsDoNotMatch && (
-                      <div className="mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold text-red-400">
-                        <FiX size={8} />
-                        PASSWORDS DO NOT MATCH
-                      </div>
+                      <StatusMessage
+                        status="unavailable"
+                        message="PASSWORDS DO NOT MATCH"
+                      />
                     )}
                   </div>
 
-                  {/* TERMS */}
+                  {/* TERMS AND CONDITIONS */}
 
-                  <label className="flex cursor-pointer items-center gap-2">
+                  <label
+                    className={`group flex cursor-pointer items-start gap-2 rounded border-2 p-2 transition-all duration-300 ${
+                      termsAccepted
+                        ? darkMode
+                          ? "border-green-500/40 bg-green-500/5"
+                          : "border-green-500/40 bg-green-500/5"
+                        : darkMode
+                          ? "border-transparent hover:border-purple-500/20"
+                          : "border-transparent hover:border-purple-500/20"
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      required
-                      className="h-3 w-3 accent-purple-600"
+                      checked={termsAccepted}
+                      onChange={handleTermsChange}
+                      className="mt-0.5 h-3 w-3 cursor-pointer accent-purple-600"
                     />
 
                     <span
-                      className={`font-mono text-[6px] uppercase ${
-                        darkMode
-                          ? "text-white/30"
-                          : "text-black/45"
+                      className={`font-mono text-[6px] uppercase leading-3 transition-colors ${
+                        termsAccepted
+                          ? "text-green-400"
+                          : darkMode
+                            ? "text-white/30"
+                            : "text-black/45"
                       }`}
                     >
-                      I agree to the terms and privacy
-                      policy
+                      I agree to the{" "}
+                      <span className="font-bold text-purple-400">
+                        Terms & Conditions
+                      </span>{" "}
+                      and{" "}
+                      <span className="font-bold text-purple-400">
+                        Privacy Policy
+                      </span>
                     </span>
+
+                    {termsAccepted && (
+                      <FiCheck
+                        size={11}
+                        className="ml-auto shrink-0 text-green-400"
+                      />
+                    )}
                   </label>
 
                   {/* ERROR */}
 
                   {error && (
-                    <div className="border border-red-500/30 bg-red-500/5 px-2 py-1.5">
+                    <div className="animate-[fadeIn_0.2s_ease-out] border border-red-500/30 bg-red-500/5 px-2 py-1.5">
                       <p className="font-mono text-[6px] font-bold uppercase text-red-400">
                         {error}
                       </p>
@@ -1261,7 +1119,7 @@ const Register = () => {
                   {/* SUCCESS */}
 
                   {success && (
-                    <div className="border border-green-500/30 bg-green-500/5 px-2 py-1.5">
+                    <div className="animate-[fadeIn_0.2s_ease-out] border border-green-500/30 bg-green-500/5 px-2 py-1.5">
                       <p className="font-mono text-[6px] font-bold uppercase text-green-400">
                         ✓ {success}
                       </p>
@@ -1273,26 +1131,32 @@ const Register = () => {
                   <button
                     type="submit"
                     disabled={isButtonDisabled}
-                    className={`group flex h-9 w-full items-center justify-center gap-3 border-2 border-purple-400 bg-purple-600 font-mono text-[8px] font-black uppercase tracking-widest text-white shadow-[3px_3px_0px_#312e81] transition-all ${
+                    className={`group flex h-9 w-full items-center justify-center gap-3 border-2 border-purple-400 bg-purple-600 font-mono text-[8px] font-black uppercase tracking-widest text-white shadow-[3px_3px_0px_#312e81] transition-all duration-300 ${
                       isButtonDisabled
                         ? "cursor-not-allowed opacity-50"
-                        : "hover:bg-purple-500 hover:shadow-[1px_1px_0px_#312e81]"
+                        : "hover:-translate-y-0.5 hover:bg-purple-500 hover:shadow-[4px_4px_0px_#312e81] active:translate-y-0 active:shadow-[1px_1px_0px_#312e81]"
                     }`}
                   >
                     {loading ? (
                       <>
                         <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                        Sending OTP...
+                        Creating Account...
                       </>
-                    ) : usernameStatus ===
-                      "checking" ? (
+                    ) : usernameStatus === "checking" ? (
                       <>Checking Username...</>
+                    ) : emailStatus === "checking" ? (
+                      <>Validating Email...</>
+                    ) : !termsAccepted ? (
+                      <>
+                        Accept Terms
+                        <FiLock size={12} />
+                      </>
                     ) : (
                       <>
                         Create Account
                         <FiArrowRight
                           size={13}
-                          className="transition-transform group-hover:translate-x-1"
+                          className="transition-transform duration-300 group-hover:translate-x-1"
                         />
                       </>
                     )}
@@ -1303,16 +1167,12 @@ const Register = () => {
 
                 <div
                   className={`mt-2 border-t-2 pt-2 text-center ${
-                    darkMode
-                      ? "border-[#25222c]"
-                      : "border-black/10"
+                    darkMode ? "border-[#25222c]" : "border-black/10"
                   }`}
                 >
                   <p
                     className={`font-mono text-[7px] uppercase ${
-                      darkMode
-                        ? "text-white/50"
-                        : "text-black/55"
+                      darkMode ? "text-white/50" : "text-black/55"
                     }`}
                   >
                     Already have an account?
@@ -1321,13 +1181,12 @@ const Register = () => {
                   <button
                     type="button"
                     onClick={handleLogin}
-                    className="group mt-0.5 inline-flex items-center gap-2 font-mono text-[9px] font-black uppercase tracking-wider text-purple-500 hover:text-purple-400"
+                    className="group mt-0.5 inline-flex items-center gap-2 font-mono text-[9px] font-black uppercase tracking-wider text-purple-500 transition-colors hover:text-purple-400"
                   >
                     Sign In
-
                     <FiArrowRight
                       size={11}
-                      className="transition-transform group-hover:translate-x-1"
+                      className="transition-transform duration-300 group-hover:translate-x-1"
                     />
                   </button>
                 </div>
@@ -1396,7 +1255,7 @@ const InputField = ({
       </label>
 
       <div
-        className={`flex h-8 border-2 transition focus-within:border-purple-500 ${
+        className={`flex h-8 border-2 transition-all duration-300 focus-within:border-purple-500 ${
           isInvalid
             ? "border-red-500"
             : isValid
@@ -1451,29 +1310,127 @@ const InputField = ({
 };
 
 // =====================================================
+// PASSWORD FIELD
+// =====================================================
+
+const PasswordField = ({
+  label,
+  name,
+  value,
+  onChange,
+  showPassword,
+  setShowPassword,
+  placeholder,
+  darkMode,
+  isValid = false,
+  isInvalid = false,
+}) => {
+  return (
+    <div>
+      <label className="mb-0.5 block font-mono text-[7px] font-bold uppercase tracking-widest opacity-60">
+        {label}
+      </label>
+
+      <div
+        className={`flex h-8 border-2 transition-all duration-300 focus-within:border-purple-500 ${
+          isInvalid
+            ? "border-red-500"
+            : isValid
+              ? "border-green-500"
+              : darkMode
+                ? "border-[#302c38] bg-[#0b0a0e]"
+                : "border-black/15 bg-white"
+        }`}
+      >
+        <div
+          className={`flex w-8 shrink-0 items-center justify-center border-r-2 border-inherit ${
+            isInvalid
+              ? "text-red-400"
+              : isValid
+                ? "text-green-400"
+                : "text-purple-400"
+          }`}
+        >
+          <FiLock size={13} />
+        </div>
+
+        <input
+          name={name}
+          value={value}
+          onChange={onChange}
+          type={showPassword ? "text" : "password"}
+          placeholder={placeholder}
+          required
+          autoComplete="new-password"
+          className={`min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[9px] outline-none ${
+            darkMode
+              ? "text-white placeholder:text-white/20"
+              : "text-black placeholder:text-black/25"
+          }`}
+        />
+
+        <button
+          type="button"
+          onClick={() => setShowPassword((prev) => !prev)}
+          className={`flex w-8 shrink-0 items-center justify-center border-l-2 border-inherit transition-colors hover:text-purple-400 ${
+            darkMode ? "text-white/30" : "text-black/30"
+          }`}
+          aria-label={showPassword ? "Hide password" : "Show password"}
+        >
+          {showPassword ? <FiEyeOff size={13} /> : <FiEye size={13} />}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// =====================================================
+// STATUS MESSAGE
+// =====================================================
+
+const StatusMessage = ({ status, message }) => {
+  const isChecking = status === "checking";
+  const isSuccess = status === "available";
+  const isError =
+    status === "unavailable" || status === "invalid" || status === "error";
+
+  return (
+    <div
+      className={`mt-0.5 flex items-center gap-1 font-mono text-[6px] font-bold ${
+        isSuccess
+          ? "text-green-400"
+          : isError
+            ? "text-red-400"
+            : isChecking
+              ? "text-yellow-400"
+              : "text-white/30"
+      }`}
+    >
+      {isChecking && (
+        <span className="h-2 w-2 animate-spin rounded-full border border-yellow-400/30 border-t-yellow-400" />
+      )}
+
+      {isSuccess && <FiCheck size={8} />}
+
+      {isError && <FiX size={8} />}
+
+      {message}
+    </div>
+  );
+};
+
+// =====================================================
 // PASSWORD REQUIREMENT
 // =====================================================
 
-const PasswordRequirement = ({
-  valid,
-  text,
-  darkMode,
-}) => {
+const PasswordRequirement = ({ valid, text, darkMode }) => {
   return (
     <div
-      className={`flex items-center gap-1 font-mono text-[5px] ${
-        valid
-          ? "text-green-400"
-          : darkMode
-            ? "text-white/25"
-            : "text-black/35"
+      className={`flex items-center gap-1 font-mono text-[5px] transition-colors duration-300 ${
+        valid ? "text-green-400" : darkMode ? "text-white/25" : "text-black/35"
       }`}
     >
-      {valid ? (
-        <FiCheck size={7} />
-      ) : (
-        <FiX size={7} />
-      )}
+      {valid ? <FiCheck size={7} /> : <FiX size={7} />}
 
       {text}
     </div>
@@ -1484,34 +1441,26 @@ const PasswordRequirement = ({
 // FEATURE CARD
 // =====================================================
 
-const FeatureCard = ({
-  icon,
-  title,
-  description,
-  iconClass,
-  darkMode,
-}) => {
+const FeatureCard = ({ icon, title, description, iconClass, darkMode }) => {
   return (
     <div
-      className={`border-2 p-3 transition-all duration-300 hover:-translate-y-1 ${
+      className={`group border-2 p-3 transition-all duration-300 hover:-translate-y-1 ${
         darkMode
-          ? "border-[#292630] bg-[#111014]"
-          : "border-black/10 bg-white/50"
+          ? "border-[#292630] bg-[#111014] hover:border-purple-500/40"
+          : "border-black/10 bg-white/50 hover:border-purple-500/30"
       }`}
     >
-      <div className={`mb-2 ${iconClass}`}>
+      <div
+        className={`mb-2 transition-transform duration-300 group-hover:scale-110 ${iconClass}`}
+      >
         {icon}
       </div>
 
-      <p className="font-mono text-[9px] font-bold">
-        {title}
-      </p>
+      <p className="font-mono text-[9px] font-bold">{title}</p>
 
       <p
         className={`mt-1 font-mono text-[7px] leading-3 ${
-          darkMode
-            ? "text-white/30"
-            : "text-black/40"
+          darkMode ? "text-white/30" : "text-black/40"
         }`}
       >
         {description}
@@ -1521,4 +1470,3 @@ const FeatureCard = ({
 };
 
 export default Register;
-
