@@ -1,7 +1,6 @@
 const UserModel = require("../../model/user.model");
 
 const {
-  verifySession,
   rotateRefreshToken,
   destroySession,
 } = require("../../services/session.service");
@@ -23,41 +22,82 @@ const {
  * - refreshToken cookie
  * - sessionId cookie
  *
- * Then rotates the refresh token.
+ * Flow:
+ *
+ * refreshToken + sessionId
+ *          ↓
+ *    Redis session
+ *          ↓
+ *    verify + rotate
+ *          ↓
+ *  new refresh token
+ *          ↓
+ *   new access token
+ *          ↓
+ *      new cookies
  */
 async function RefreshTokenController(req, res) {
   try {
+    // =====================================================
+    // 1. GET REFRESH COOKIES
+    // =====================================================
+
     const refreshToken = req.cookies?.refreshToken;
 
     const sessionId = req.cookies?.sessionId;
 
-    // Missing cookies.
+    // =====================================================
+    // 2. CHECK REQUIRED COOKIES
+    // =====================================================
+
     if (!refreshToken || !sessionId) {
       clearAuthCookies(res);
 
       return res.status(401).json({
         success: false,
         message: "Refresh session is missing or expired",
+        code: "REFRESH_SESSION_MISSING",
       });
     }
 
-    // Verify Redis session.
-    const session = await verifySession({
+    // =====================================================
+    // 3. ROTATE REFRESH TOKEN
+    // =====================================================
+    //
+    // IMPORTANT:
+    // rotateRefreshToken() must verify the current
+    // refresh token and replace its hash.
+    //
+    // Ideally this operation should be atomic in Redis.
+    //
+
+    const rotated = await rotateRefreshToken({
       sessionId,
-      refreshToken,
+      currentRefreshToken: refreshToken,
     });
 
-    if (!session) {
+    if (!rotated) {
+      // Invalid refresh token/session.
+      //
+      // Destroy the session so a potentially compromised
+      // refresh session cannot continue being used.
+
+      await destroySession(sessionId);
+
       clearAuthCookies(res);
 
       return res.status(401).json({
         success: false,
-        message: "Invalid or expired refresh session",
+        message: "Refresh token is no longer valid",
+        code: "REFRESH_TOKEN_INVALID",
       });
     }
 
-    // Find user.
-    const user = await UserModel.findById(session.userId);
+    // =====================================================
+    // 4. FIND USER
+    // =====================================================
+
+    const user = await UserModel.findById(rotated.userId);
 
     if (!user) {
       await destroySession(sessionId);
@@ -67,10 +107,14 @@ async function RefreshTokenController(req, res) {
       return res.status(401).json({
         success: false,
         message: "User account no longer exists",
+        code: "USER_NOT_FOUND",
       });
     }
 
-    // Security check.
+    // =====================================================
+    // 5. CHECK EMAIL VERIFICATION
+    // =====================================================
+
     if (user.isEmailVerified !== true) {
       await destroySession(sessionId);
 
@@ -79,29 +123,25 @@ async function RefreshTokenController(req, res) {
       return res.status(403).json({
         success: false,
         message: "Email verification is required",
+        code: "EMAIL_NOT_VERIFIED",
       });
     }
 
-    // Rotate refresh token.
-    const rotated = await rotateRefreshToken({
-      sessionId,
-      currentRefreshToken: refreshToken,
-    });
+    // =====================================================
+    // 6. GENERATE NEW ACCESS TOKEN
+    // =====================================================
 
-    if (!rotated) {
-      clearAuthCookies(res);
-
-      return res.status(401).json({
-        success: false,
-        message: "Refresh token is no longer valid",
-      });
-    }
-
-    // Create new access token.
     const accessToken = generateToken(user, sessionId);
 
-    // Update cookies.
+    // =====================================================
+    // 7. UPDATE AUTH COOKIES
+    // =====================================================
+
     setAuthCookies(res, accessToken, rotated.refreshToken, sessionId);
+
+    // =====================================================
+    // 8. SUCCESS
+    // =====================================================
 
     return res.status(200).json({
       success: true,
@@ -116,6 +156,7 @@ async function RefreshTokenController(req, res) {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      code: "REFRESH_TOKEN_ERROR",
     });
   }
 }

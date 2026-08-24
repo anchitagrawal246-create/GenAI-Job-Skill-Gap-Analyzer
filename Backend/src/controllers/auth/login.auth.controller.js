@@ -26,12 +26,20 @@ const { setAuthCookies } = require("../../utils/cookie.utils");
  *       ↓
  * Create Redis session
  *       ↓
- * Create JWT
+ * Create JWT with:
+ *   - user ID
+ *   - username
+ *   - session ID
+ *   - unique jti
  *       ↓
  * Set cookies
  */
 async function LoginUserController(req, res) {
   try {
+    // =====================================================
+    // 1. GET LOGIN DATA
+    // =====================================================
+
     const { email, password } = req.body || {};
 
     if (!email || !password) {
@@ -40,6 +48,10 @@ async function LoginUserController(req, res) {
         message: "Please provide email and password",
       });
     }
+
+    // =====================================================
+    // 2. NORMALIZE EMAIL
+    // =====================================================
 
     const normalizedEmail = email.toString().trim().toLowerCase();
 
@@ -52,7 +64,10 @@ async function LoginUserController(req, res) {
       });
     }
 
-    // Find user.
+    // =====================================================
+    // 3. FIND USER
+    // =====================================================
+
     const user = await UserModel.findOne({
       email: normalizedEmail,
     });
@@ -64,7 +79,10 @@ async function LoginUserController(req, res) {
       });
     }
 
-    // Compare password.
+    // =====================================================
+    // 4. COMPARE PASSWORD
+    // =====================================================
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
@@ -74,7 +92,10 @@ async function LoginUserController(req, res) {
       });
     }
 
-    // Email must be verified.
+    // =====================================================
+    // 5. CHECK EMAIL VERIFICATION
+    // =====================================================
+
     if (user.isEmailVerified !== true) {
       return res.status(403).json({
         success: false,
@@ -82,23 +103,39 @@ async function LoginUserController(req, res) {
       });
     }
 
-    // Request information.
+    // =====================================================
+    // 6. REQUEST INFORMATION
+    // =====================================================
+
     const userAgent = req.get("user-agent") || "";
 
     const ip = req.ip || req.socket?.remoteAddress || "";
 
-    // Create Redis session.
+    // =====================================================
+    // 7. CREATE REDIS SESSION
+    // =====================================================
+
     const session = await createSession({
       userId: user._id.toString(),
       userAgent,
       ip,
     });
 
-    // Create JWT access token.
+    // =====================================================
+    // 8. CREATE ACCESS TOKEN
+    // =====================================================
+
     const accessToken = generateToken(user, session.sessionId);
 
-    // Set cookies.
+    // =====================================================
+    // 9. SET AUTH COOKIES
+    // =====================================================
+
     setAuthCookies(res, accessToken, session.refreshToken, session.sessionId);
+
+    // =====================================================
+    // 10. RESPONSE
+    // =====================================================
 
     return res.status(200).json({
       success: true,

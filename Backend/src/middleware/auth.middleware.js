@@ -2,40 +2,56 @@ const jwt = require("jsonwebtoken");
 
 const { verifyAccessSession } = require("../services/session.service");
 
+const {
+  isAccessTokenBlacklisted,
+} = require("../services/tokenBlacklist.service");
+
+// =========================================================
+// JWT CONFIGURATION
+// =========================================================
+
+const JWT_ISSUER = process.env.JWT_ISSUER || "ai-interview";
+
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "ai-interview-client";
+
 // =========================================================
 // AUTH MIDDLEWARE
 // =========================================================
 
 /**
- * Authentication middleware
+ * Authentication middleware.
  *
- * Flow:
+ * Authentication flow:
  *
  * Browser
- *   │
- *   │ accessToken cookie
- *   ▼
+ *    │
+ *    │ accessToken HttpOnly cookie
+ *    ▼
  * JWT verification
- *   │
- *   ▼
- * sessionId extracted from JWT
- *   │
- *   ▼
+ *    │
+ *    ▼
+ * JWT payload validation
+ *    │
+ *    ▼
+ * Access-token blacklist check
+ *    │
+ *    ▼
  * Redis session verification
- *   │
- *   ▼
- * req.user
+ *    │
+ *    ▼
+ * JWT user/session consistency check
+ *    │
+ *    ▼
+ * req.user + req.session
  *
  * IMPORTANT:
- * Access token is short-lived.
  *
- * Refresh token is NOT used here.
- *
- * If accessToken expires, the frontend should call:
- *
- * POST /api/auth/refresh
- *
- * and receive a new access token.
+ * - Only the access token is used here.
+ * - Refresh token is NOT used here.
+ * - Redis session must still be active.
+ * - Blacklisted access tokens are rejected.
+ * - Expired access tokens return ACCESS_TOKEN_EXPIRED.
+ * - Frontend should then call POST /api/auth/refresh.
  */
 async function authMiddleware(req, res, next) {
   try {
@@ -58,11 +74,12 @@ async function authMiddleware(req, res, next) {
     // =====================================================
 
     if (!process.env.JWT_SECRET_KEY) {
-      console.error("JWT_SECRET_KEY is missing from .env");
+      console.error("JWT_SECRET_KEY is missing from environment variables");
 
       return res.status(500).json({
         success: false,
         message: "Authentication configuration error",
+        code: "AUTH_CONFIG_ERROR",
       });
     }
 
@@ -74,9 +91,8 @@ async function authMiddleware(req, res, next) {
 
     try {
       decoded = jwt.verify(accessToken, process.env.JWT_SECRET_KEY, {
-        issuer: process.env.JWT_ISSUER || "ai-interview",
-
-        audience: process.env.JWT_AUDIENCE || "ai-interview-client",
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
       });
     } catch (error) {
       // ---------------------------------------------------
@@ -92,8 +108,22 @@ async function authMiddleware(req, res, next) {
       }
 
       // ---------------------------------------------------
-      // Invalid token
+      // Invalid / malformed / wrong signature
       // ---------------------------------------------------
+
+      if (
+        error.name === "JsonWebTokenError" ||
+        error.name === "NotBeforeError"
+      ) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid access token",
+          code: "ACCESS_TOKEN_INVALID",
+        });
+      }
+
+      // Unknown JWT verification failure
+      console.error("JWT verification error:", error);
 
       return res.status(401).json({
         success: false,
@@ -106,7 +136,45 @@ async function authMiddleware(req, res, next) {
     // 4. VALIDATE JWT PAYLOAD
     // =====================================================
 
-    if (!decoded || !decoded.id || !decoded.sessionId || !decoded.jti) {
+    if (!decoded || typeof decoded !== "object") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication session",
+        code: "INVALID_SESSION_PAYLOAD",
+      });
+    }
+
+    const { id, username, sessionId, jti } = decoded;
+
+    // -----------------------------------------------------
+    // Required claims
+    // -----------------------------------------------------
+
+    if (!id || !sessionId || !jti || !username) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication session",
+        code: "INVALID_SESSION_PAYLOAD",
+      });
+    }
+
+    // -----------------------------------------------------
+    // Validate claim types
+    // -----------------------------------------------------
+
+    if (typeof id !== "string" && typeof id !== "object") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication session",
+        code: "INVALID_SESSION_PAYLOAD",
+      });
+    }
+
+    if (
+      typeof sessionId !== "string" ||
+      typeof jti !== "string" ||
+      typeof username !== "string"
+    ) {
       return res.status(401).json({
         success: false,
         message: "Invalid authentication session",
@@ -115,10 +183,24 @@ async function authMiddleware(req, res, next) {
     }
 
     // =====================================================
-    // 5. VERIFY REDIS SESSION
+    // 5. CHECK ACCESS TOKEN BLACKLIST
     // =====================================================
 
-    const session = await verifyAccessSession(decoded.sessionId);
+    const blacklisted = await isAccessTokenBlacklisted(jti);
+
+    if (blacklisted) {
+      return res.status(401).json({
+        success: false,
+        message: "Access token has been revoked",
+        code: "ACCESS_TOKEN_REVOKED",
+      });
+    }
+
+    // =====================================================
+    // 6. VERIFY REDIS SESSION
+    // =====================================================
+
+    const session = await verifyAccessSession(sessionId);
 
     if (!session) {
       return res.status(401).json({
@@ -129,16 +211,15 @@ async function authMiddleware(req, res, next) {
     }
 
     // =====================================================
-    // 6. MAKE SURE JWT USER MATCHES SESSION USER
+    // 7. VERIFY SESSION USER
     // =====================================================
 
-    if (session.userId.toString() !== decoded.id.toString()) {
+    if (String(session.userId) !== String(id)) {
       console.error("Session/User mismatch detected", {
-        tokenUserId: decoded.id,
-
+        tokenUserId: id,
         sessionUserId: session.userId,
-
-        sessionId: decoded.sessionId,
+        sessionId,
+        jti,
       });
 
       return res.status(401).json({
@@ -149,31 +230,51 @@ async function authMiddleware(req, res, next) {
     }
 
     // =====================================================
-    // 7. ATTACH AUTH USER
+    // 8. VERIFY SESSION ID CONSISTENCY
+    // =====================================================
+
+    if (!session.sessionId || String(session.sessionId) !== String(sessionId)) {
+      console.error("Session ID mismatch detected", {
+        tokenSessionId: sessionId,
+        redisSessionId: session.sessionId,
+        userId: id,
+        jti,
+      });
+
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication session",
+        code: "SESSION_ID_MISMATCH",
+      });
+    }
+
+    // =====================================================
+    // 9. ATTACH AUTHENTICATED USER
     // =====================================================
 
     req.user = {
-      id: decoded.id,
-
-      username: decoded.username,
-
-      sessionId: decoded.sessionId,
-
-      jti: decoded.jti,
+      id,
+      username,
+      sessionId,
+      jti,
     };
 
     // =====================================================
-    // 8. ATTACH SESSION
+    // 10. ATTACH REDIS SESSION
     // =====================================================
 
     req.session = session;
 
     // =====================================================
-    // 9. CONTINUE
+    // 11. CONTINUE REQUEST
     // =====================================================
 
     return next();
   } catch (error) {
+    // =====================================================
+    // UNEXPECTED AUTHENTICATION ERROR
+    // =====================================================
+
     console.error("Auth Middleware Error:", error);
 
     return res.status(401).json({
@@ -183,5 +284,9 @@ async function authMiddleware(req, res, next) {
     });
   }
 }
+
+// =========================================================
+// EXPORT
+// =========================================================
 
 module.exports = authMiddleware;

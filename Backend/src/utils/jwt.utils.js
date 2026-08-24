@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 
 // =========================================================
@@ -6,14 +5,50 @@ const jwt = require("jsonwebtoken");
 // =========================================================
 
 /**
- * Short lifetime for access tokens.
+ * Short-lived access token lifetime.
  *
  * Example:
  * ACCESS_TOKEN_EXPIRES_IN=15m
- *
- * @type {string}
  */
 const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+
+/**
+ * JWT issuer.
+ */
+const JWT_ISSUER = process.env.JWT_ISSUER || "ai-interview";
+
+/**
+ * JWT audience.
+ */
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "ai-interview-client";
+
+// =========================================================
+// JWT SECRET
+// =========================================================
+
+/**
+ * Get and validate JWT signing secret.
+ *
+ * @returns {string}
+ * @throws {Error}
+ */
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET_KEY;
+
+  if (!secret) {
+    throw new Error("JWT_SECRET_KEY is missing from .env");
+  }
+
+  if (typeof secret !== "string") {
+    throw new Error("JWT_SECRET_KEY must be a string");
+  }
+
+  if (secret.length < 32) {
+    throw new Error("JWT_SECRET_KEY must be at least 32 characters long");
+  }
+
+  return secret;
+}
 
 // =========================================================
 // GENERATE ACCESS TOKEN
@@ -22,15 +57,14 @@ const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
 /**
  * Generates a short-lived JWT access token.
  *
- * The access token contains:
- * - User ID
- * - Username
- * - Redis session ID
- * - Unique JWT ID (jti)
+ * Access token contains:
  *
- * The token is later verified by:
+ * - id
+ * - username
+ * - sessionId
+ * - jti
  *
- * middleware/auth.middleware.js
+ * The refresh token is NEVER placed inside the JWT.
  *
  * Authentication flow:
  *
@@ -50,65 +84,116 @@ const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
  *
  * @param {Object} user
  * @param {string} sessionId
- * @returns {string} Signed JWT access token
- * @throws {Error} If JWT secret or session ID is missing
+ * @returns {string}
+ * @throws {Error}
  */
 function generateToken(user, sessionId) {
   // -------------------------------------------------------
-  // Validate JWT secret
+  // Validate user
   // -------------------------------------------------------
 
-  if (!process.env.JWT_SECRET_KEY) {
-    throw new Error("JWT_SECRET_KEY is missing from .env");
+  if (!user) {
+    throw new Error("User is required to generate access token");
+  }
+
+  if (!user._id) {
+    throw new Error("User ID is required to generate access token");
   }
 
   // -------------------------------------------------------
-  // Validate Redis session ID
+  // Validate session ID
   // -------------------------------------------------------
 
-  if (!sessionId) {
+  if (!sessionId || typeof sessionId !== "string") {
     throw new Error("sessionId is required to generate access token");
   }
 
   // -------------------------------------------------------
-  // Generate unique JWT ID
+  // Get JWT secret
   // -------------------------------------------------------
 
-  const jti = crypto.randomUUID();
+  const secret = getJwtSecret();
+
+  // -------------------------------------------------------
+  // JWT payload
+  // -------------------------------------------------------
+
+  const payload = {
+    // MongoDB user ID
+    id: String(user._id),
+
+    // Username
+    username: typeof user.username === "string" ? user.username : undefined,
+
+    // Redis authentication session
+    sessionId,
+  };
 
   // -------------------------------------------------------
   // Create JWT
   // -------------------------------------------------------
 
-  return jwt.sign(
-    {
-      // MongoDB user ID
-      id: user._id,
+  return jwt.sign(payload, secret, {
+    // Short-lived access token
+    expiresIn: ACCESS_TOKEN_EXPIRES_IN,
 
-      // Username
-      username: user.username,
+    // JWT issuer
+    issuer: JWT_ISSUER,
 
-      // Redis session ID
-      sessionId,
+    // JWT audience
+    audience: JWT_AUDIENCE,
 
-      // Unique token identifier
-      jti,
-    },
+    /*
+     * jsonwebtoken generates the jti claim.
+     *
+     * After verification:
+     *
+     * decoded.jti
+     *
+     * will be available to auth.middleware.js.
+     */
+    jwtid: require("crypto").randomUUID(),
+  });
+}
 
-    // JWT signing secret
-    process.env.JWT_SECRET_KEY,
+// =========================================================
+// VERIFY ACCESS TOKEN
+// =========================================================
 
-    {
-      // Short-lived access token
-      expiresIn: ACCESS_TOKEN_EXPIRES_IN,
+/**
+ * Verify an access token.
+ *
+ * This function centralizes JWT verification configuration
+ * so middleware does not need to duplicate the secret,
+ * issuer and audience configuration.
+ *
+ * @param {string} accessToken
+ * @returns {Object}
+ * @throws {Error}
+ */
+function verifyToken(accessToken) {
+  // -------------------------------------------------------
+  // Validate token
+  // -------------------------------------------------------
 
-      // JWT issuer
-      issuer: process.env.JWT_ISSUER || "ai-interview",
+  if (!accessToken || typeof accessToken !== "string") {
+    throw new Error("Access token is required");
+  }
 
-      // JWT audience
-      audience: process.env.JWT_AUDIENCE || "ai-interview-client",
-    },
-  );
+  // -------------------------------------------------------
+  // Get JWT secret
+  // -------------------------------------------------------
+
+  const secret = getJwtSecret();
+
+  // -------------------------------------------------------
+  // Verify JWT
+  // -------------------------------------------------------
+
+  return jwt.verify(accessToken, secret, {
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  });
 }
 
 // =========================================================
@@ -116,5 +201,10 @@ function generateToken(user, sessionId) {
 // =========================================================
 
 module.exports = {
+  ACCESS_TOKEN_EXPIRES_IN,
+  JWT_ISSUER,
+  JWT_AUDIENCE,
+
   generateToken,
+  verifyToken,
 };
