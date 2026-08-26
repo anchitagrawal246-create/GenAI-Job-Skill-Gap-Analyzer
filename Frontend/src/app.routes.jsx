@@ -8,6 +8,10 @@ import ResetPassword from "./features/auth/pages/ResetPassword";
 import Success from "./features/auth/components/Dashboard";
 import ForgotUserId from "./features/auth/pages/ForgotUserId";
 
+import Dashboard from "./features/home/dashboard";
+import { Profile } from "./features/home/Profile";
+import InterviewAgent from "./features/home/InterviewAgent";
+
 export const router = createBrowserRouter([
   // =====================================================
   // HOME
@@ -42,10 +46,30 @@ export const router = createBrowserRouter([
   },
 
   // =====================================================
-  // SUCCESS / DASHBOARD
+  // DASHBOARD
   // =====================================================
   {
     path: "/success",
     element: <Success />,
+  },
+  {
+    path: "/dashboard",
+    element: <Dashboard />,
+  },
+
+  // =====================================================
+  // PROFILE
+  // =====================================================
+  {
+    path: "/profile",
+    element: <Profile />,
+  },
+
+  // =====================================================
+  // AI INTERVIEW
+  // =====================================================
+  {
+    path: "/interviews/:id",
+    element: <InterviewAgent />,
   },
 ]);

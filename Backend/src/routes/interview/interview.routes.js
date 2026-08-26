@@ -1,8 +1,7 @@
-
 const { Router } = require("express");
 
 // ============================================================
-// CONTROLLERS
+// INTERVIEW CONTROLLER
 // ============================================================
 
 const {
@@ -12,9 +11,18 @@ const {
   startInterview,
   getInterviewQuestions,
   generateInterviewQuestion,
+  getNextQuestion,
   submitAnswer,
+  getAnswer,
+  getInterviewAnswers,
   completeInterview,
+  cancelInterview,
+  getInterviewProgress,
 } = require("../../controllers/interview/interview.controller");
+
+// ============================================================
+// EVALUATION CONTROLLER
+// ============================================================
 
 const {
   evaluateAnswer,
@@ -36,143 +44,155 @@ const validateObjectId = require("../../middleware/validateObjectId.middleware")
 const router = Router();
 
 // ============================================================
-// AUTHENTICATION
+// GLOBAL AUTH
 // ============================================================
 
-// Every interview route requires authentication.
-router.use(authMiddleware);
+router.use((req, res, next) => {
+  console.log("==================================================");
+  console.log("[INTERVIEW ROUTE]");
+  console.log("METHOD:", req.method);
+  console.log("URL:", req.originalUrl);
+  console.log("BEFORE AUTH USER:", req.user);
+  console.log("==================================================");
+
+  authMiddleware(req, res, next);
+});
 
 // ============================================================
-// INTERVIEW ROUTES
+// CREATE
 // ============================================================
 
-// ------------------------------------------------------------
-// CREATE INTERVIEW
-// POST /api/interviews
-// ------------------------------------------------------------
+router.post("/", (req, res, next) => {
+  console.log("[ROUTE] POST /interviews");
+  console.log("[ROUTE] BODY:", req.body);
 
-router.post("/", createInterview);
-
-// ------------------------------------------------------------
-// GET USER INTERVIEWS
-// GET /api/interviews
-// ------------------------------------------------------------
-
-router.get("/", getInterviews);
-
-// ------------------------------------------------------------
-// GET SINGLE INTERVIEW
-// GET /api/interviews/:id
-// ------------------------------------------------------------
-
-router.get(
-  "/:id",
-  validateObjectId("id"),
-  getInterview
-);
-
-// ------------------------------------------------------------
-// START INTERVIEW
-// POST /api/interviews/:id/start
-// ------------------------------------------------------------
-
-router.post(
-  "/:id/start",
-  validateObjectId("id"),
-  startInterview
-);
-
-// ------------------------------------------------------------
-// GET INTERVIEW QUESTIONS
-// GET /api/interviews/:id/questions
-// ------------------------------------------------------------
-
-router.get(
-  "/:id/questions",
-  validateObjectId("id"),
-  getInterviewQuestions
-);
-
-// ------------------------------------------------------------
-// GENERATE NEXT AI QUESTION
-// POST /api/interviews/:id/question
-// ------------------------------------------------------------
-
-router.post(
-  "/:id/question",
-  validateObjectId("id"),
-  generateInterviewQuestion
-);
+  createInterview(req, res, next);
+});
 
 // ============================================================
-// ANSWER ROUTES
+// GET ALL
 // ============================================================
 
-// ------------------------------------------------------------
-// SUBMIT ANSWER
-// POST /api/interviews/:id/questions/:questionId/answer
-// ------------------------------------------------------------
+router.get("/", (req, res, next) => {
+  console.log("[ROUTE] GET /interviews");
+
+  getInterviews(req, res, next);
+});
+
+// ============================================================
+// GET BY ID
+// ============================================================
+
+router.get("/:id", validateObjectId("id"), (req, res, next) => {
+  console.log("[ROUTE] GET /interviews/:id");
+  console.log("[ROUTE] PARAMS:", req.params);
+
+  getInterview(req, res, next);
+});
+
+// ============================================================
+// START
+// ============================================================
+
+router.post("/:id/start", validateObjectId("id"), (req, res, next) => {
+  console.log("[ROUTE] POST /interviews/:id/start");
+  console.log("[ROUTE] PARAMS:", req.params);
+
+  startInterview(req, res, next);
+});
+
+// ============================================================
+// QUESTIONS
+// ============================================================
+
+router.get("/:id/questions", validateObjectId("id"), (req, res, next) => {
+  console.log("[ROUTE] GET /interviews/:id/questions");
+
+  getInterviewQuestions(req, res, next);
+});
+
+router.get("/:id/next-question", validateObjectId("id"), (req, res, next) => {
+  console.log("[ROUTE] GET /interviews/:id/next-question");
+
+  getNextQuestion(req, res, next);
+});
+
+// ============================================================
+// GENERATE QUESTION
+// ============================================================
+
+router.post("/:id/question", validateObjectId("id"), (req, res, next) => {
+  console.log("==================================================");
+  console.log("[ROUTE] POST /interviews/:id/question");
+  console.log("PARAMS:", req.params);
+  console.log("USER:", req.user);
+  console.log("BODY:", req.body);
+  console.log("==================================================");
+
+  generateInterviewQuestion(req, res, next);
+});
+
+// ============================================================
+// ANSWERS
+// ============================================================
 
 router.post(
   "/:id/questions/:questionId/answer",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  submitAnswer
+  (req, res, next) => {
+    console.log("[ROUTE] POST /interviews/:id/questions/:questionId/answer");
+
+    submitAnswer(req, res, next);
+  },
 );
 
-// ============================================================
-// EVALUATION ROUTES
-// ============================================================
+router.get(
+  "/:id/questions/:questionId/answer",
+  validateObjectId("id"),
+  validateObjectId("questionId"),
+  getAnswer,
+);
 
-// ------------------------------------------------------------
-// EVALUATE ANSWER
-// POST /api/interviews/:id/questions/:questionId/evaluate
-// ------------------------------------------------------------
+router.get("/:id/answers", validateObjectId("id"), getInterviewAnswers);
+
+// ============================================================
+// EVALUATIONS
+// ============================================================
 
 router.post(
   "/:id/questions/:questionId/evaluate",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  evaluateAnswer
+  evaluateAnswer,
 );
-
-// ------------------------------------------------------------
-// GET SINGLE EVALUATION
-// GET /api/interviews/:id/questions/:questionId/evaluation
-// ------------------------------------------------------------
 
 router.get(
   "/:id/questions/:questionId/evaluation",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  getEvaluation
+  getEvaluation,
 );
 
-// ------------------------------------------------------------
-// GET ALL INTERVIEW EVALUATIONS
-// GET /api/interviews/:id/evaluations
-// ------------------------------------------------------------
-
-router.get(
-  "/:id/evaluations",
-  validateObjectId("id"),
-  getInterviewEvaluations
-);
+router.get("/:id/evaluations", validateObjectId("id"), getInterviewEvaluations);
 
 // ============================================================
-// COMPLETE INTERVIEW
+// PROGRESS
 // ============================================================
 
-// ------------------------------------------------------------
-// COMPLETE INTERVIEW
-// POST /api/interviews/:id/complete
-// ------------------------------------------------------------
+router.get("/:id/progress", validateObjectId("id"), getInterviewProgress);
 
-router.post(
-  "/:id/complete",
-  validateObjectId("id"),
-  completeInterview
-);
+// ============================================================
+// COMPLETE
+// ============================================================
+
+router.post("/:id/complete", validateObjectId("id"), completeInterview);
+
+// ============================================================
+// CANCEL
+// ============================================================
+
+router.post("/:id/cancel", validateObjectId("id"), cancelInterview);
 
 // ============================================================
 // EXPORT

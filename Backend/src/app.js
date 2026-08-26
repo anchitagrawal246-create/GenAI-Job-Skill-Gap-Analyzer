@@ -15,7 +15,8 @@ app.post("/test-body", (req, res) => {
   });
 });
 const authRouter = require("./routes/auth.routes");
-
+const profileRoutes = require("./routes/profile/profile.routes");
+const githubEvidenceRoutes = require("./routes/profile/githubEvidence.routes");
 app.use(cookieParser());
 
 app.use(
@@ -28,5 +29,8 @@ app.use(
 /* using all the routes here */
 app.use("/api/auth", authRouter);
 app.use("/api/interviews", interviewRoutes);
+
+app.use("/api/profile", profileRoutes);
+app.use("/api/profile/github", githubEvidenceRoutes);
 
 module.exports = app;

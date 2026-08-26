@@ -1,11 +1,18 @@
 const interviewService = require("../../services/interview/interview.service");
 const answerService = require("../../services/interview/answer.service");
-const {
-  generateNextQuestion,
-} = require("../../services/interview/interview.agent");
-const {
-  evaluateAnswer,
-} = require("../../services/interview/evaluation.service");
+const evaluationService = require("../../services/interview/evaluation.service");
+
+// ============================================================
+// HELPER
+// ============================================================
+
+const getUserId = (req) => {
+  if (!req?.user?.id) {
+    throw new Error("Authenticated user not found");
+  }
+
+  return req.user.id;
+};
 
 // ============================================================
 // CREATE INTERVIEW
@@ -13,10 +20,15 @@ const {
 
 const createInterview = async (req, res) => {
   try {
-    const interview = await interviewService.createInterview(
-      req.user.id,
-      req.body,
-    );
+    const userId = getUserId(req);
+
+    console.log("==============================================");
+    console.log("[INTERVIEW] CREATE");
+    console.log("User:", userId);
+    console.log("Body:", req.body);
+    console.log("==============================================");
+
+    const interview = await interviewService.createInterview(userId, req.body);
 
     return res.status(201).json({
       success: true,
@@ -24,11 +36,11 @@ const createInterview = async (req, res) => {
       data: interview,
     });
   } catch (error) {
-    console.error("Create interview error:", error);
+    console.error("[INTERVIEW] CREATE ERROR:", error);
 
-    return res.status(500).json({
+    return res.status(400).json({
       success: false,
-      message: error.message || "Failed to create interview",
+      message: error?.message || "Failed to create interview",
     });
   }
 };
@@ -39,18 +51,18 @@ const createInterview = async (req, res) => {
 
 const getInterviews = async (req, res) => {
   try {
-    const interviews = await interviewService.getUserInterviews(req.user.id);
+    const interviews = await interviewService.getUserInterviews(getUserId(req));
 
     return res.status(200).json({
       success: true,
       data: interviews,
     });
   } catch (error) {
-    console.error("Get interviews error:", error);
+    console.error("[INTERVIEW] GET ALL ERROR:", error);
 
-    return res.status(500).json({
+    return res.status(400).json({
       success: false,
-      message: error.message || "Failed to fetch interviews",
+      message: error?.message || "Failed to fetch interviews",
     });
   }
 };
@@ -62,7 +74,7 @@ const getInterviews = async (req, res) => {
 const getInterview = async (req, res) => {
   try {
     const interview = await interviewService.getInterviewById(
-      req.user.id,
+      getUserId(req),
       req.params.id,
     );
 
@@ -78,11 +90,11 @@ const getInterview = async (req, res) => {
       data: interview,
     });
   } catch (error) {
-    console.error("Get interview error:", error);
+    console.error("[INTERVIEW] GET ERROR:", error);
 
-    return res.status(500).json({
+    return res.status(400).json({
       success: false,
-      message: error.message || "Failed to fetch interview",
+      message: error?.message || "Failed to fetch interview",
     });
   }
 };
@@ -93,10 +105,23 @@ const getInterview = async (req, res) => {
 
 const startInterview = async (req, res) => {
   try {
+    const userId = getUserId(req);
+    const interviewId = req.params.id;
+
+    console.log("==============================================");
+    console.log("[INTERVIEW] START");
+    console.log("User:", userId);
+    console.log("Interview:", interviewId);
+    console.log("==============================================");
+
     const interview = await interviewService.startInterview(
-      req.user.id,
-      req.params.id,
+      userId,
+      interviewId,
     );
+
+    console.log("[INTERVIEW] STARTED");
+    console.log("Status:", interview?.status);
+    console.log("Started At:", interview?.startedAt);
 
     return res.status(200).json({
       success: true,
@@ -104,23 +129,23 @@ const startInterview = async (req, res) => {
       data: interview,
     });
   } catch (error) {
-    console.error("Start interview error:", error);
+    console.error("[INTERVIEW] START ERROR:", error);
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to start interview",
+      message: error?.message || "Failed to start interview",
     });
   }
 };
 
 // ============================================================
-// GET INTERVIEW QUESTIONS
+// GET ALL INTERVIEW QUESTIONS
 // ============================================================
 
 const getInterviewQuestions = async (req, res) => {
   try {
     const questions = await interviewService.getInterviewQuestions(
-      req.user.id,
+      getUserId(req),
       req.params.id,
     );
 
@@ -129,48 +154,100 @@ const getInterviewQuestions = async (req, res) => {
       data: questions,
     });
   } catch (error) {
-    console.error("Get interview questions error:", error);
+    console.error("[INTERVIEW] GET QUESTIONS ERROR:", error);
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to fetch interview questions",
+      message: error?.message || "Failed to fetch interview questions",
     });
   }
 };
 
 // ============================================================
-// GENERATE NEXT ADAPTIVE AI QUESTION
+// GENERATE NEXT ADAPTIVE QUESTION
 // ============================================================
 
 const generateInterviewQuestion = async (req, res) => {
-  try {
-    const result = await generateNextQuestion(req.user.id, req.params.id);
+  const userId = getUserId(req);
+  const interviewId = req.params.id;
 
-    return res.status(201).json({
+  console.log("");
+  console.log("==================================================");
+  console.log("[INTERVIEW AGENT] GENERATE QUESTION");
+  console.log("User ID:", userId);
+  console.log("Interview ID:", interviewId);
+  console.log("==================================================");
+
+  try {
+    const result = await interviewService.generateInterviewQuestion(
+      userId,
+      interviewId,
+    );
+
+    console.log("");
+    console.log("==================================================");
+    console.log("[INTERVIEW AGENT] QUESTION GENERATED");
+    console.log("Question ID:", result?.question?._id);
+    console.log("Question Number:", result?.questionNumber);
+    console.log("Question:", result?.question?.question);
+    console.log("Category:", result?.question?.category);
+    console.log("Difficulty:", result?.question?.difficulty);
+    console.log("Provider:", result?.provider);
+    console.log("Model:", result?.model);
+    console.log("==================================================");
+
+    return res.status(200).json({
       success: true,
       message: "Next interview question generated successfully",
-
-      data: {
-        question: result.question,
-
-        // AI provider information is useful for backend
-        // monitoring/debugging.
-        provider: result.provider,
-        model: result.model,
-      },
+      data: result,
     });
   } catch (error) {
-    console.error("Generate adaptive interview question error:", error);
+    console.error("");
+    console.error("==================================================");
+    console.error("[INTERVIEW AGENT] GENERATION FAILED");
+    console.error("Name:", error?.name);
+    console.error("Message:", error?.message);
+    console.error("Stack:", error?.stack);
+    console.error("==================================================");
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to generate next interview question",
+      message: error?.message || "Failed to generate next interview question",
+      error: {
+        name: error?.name || "Error",
+        message: error?.message || "Unknown interview generation error",
+      },
     });
   }
 };
 
 // ============================================================
-// SUBMIT INTERVIEW ANSWER
+// GET CURRENT / NEXT PENDING QUESTION
+// ============================================================
+
+const getNextQuestion = async (req, res) => {
+  try {
+    const question = await interviewService.getNextQuestion(
+      getUserId(req),
+      req.params.id,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: question,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] GET NEXT QUESTION ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to fetch next question",
+    });
+  }
+};
+
+// ============================================================
+// SUBMIT ANSWER
 // ============================================================
 
 const submitAnswer = async (req, res) => {
@@ -180,7 +257,7 @@ const submitAnswer = async (req, res) => {
     const { answerText } = req.body;
 
     const answer = await answerService.submitAnswer(
-      req.user.id,
+      getUserId(req),
       interviewId,
       questionId,
       answerText,
@@ -192,11 +269,64 @@ const submitAnswer = async (req, res) => {
       data: answer,
     });
   } catch (error) {
-    console.error("Submit answer error:", error);
+    console.error("[INTERVIEW] SUBMIT ANSWER ERROR:", error);
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to submit answer",
+      message: error?.message || "Failed to submit answer",
+    });
+  }
+};
+
+// ============================================================
+// GET SINGLE ANSWER
+// ============================================================
+
+const getAnswer = async (req, res) => {
+  try {
+    const { id: interviewId, questionId } = req.params;
+
+    const answer = await answerService.getAnswer(
+      getUserId(req),
+      interviewId,
+      questionId,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: answer,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] GET ANSWER ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to fetch answer",
+    });
+  }
+};
+
+// ============================================================
+// GET ALL INTERVIEW ANSWERS
+// ============================================================
+
+const getInterviewAnswers = async (req, res) => {
+  try {
+    const answers = await answerService.getInterviewAnswers(
+      getUserId(req),
+      req.params.id,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: answers,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] GET ANSWERS ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to fetch interview answers",
     });
   }
 };
@@ -205,31 +335,80 @@ const submitAnswer = async (req, res) => {
 // EVALUATE ANSWER
 // ============================================================
 
-const evaluateInterviewAnswer = async (req, res) => {
+const evaluateAnswer = async (req, res) => {
   try {
     const { id: interviewId, questionId } = req.params;
 
-    const result = await evaluateAnswer(req.user.id, interviewId, questionId);
+    const result = await evaluationService.evaluateAnswer(
+      getUserId(req),
+      interviewId,
+      questionId,
+    );
 
     return res.status(200).json({
       success: true,
       message: "Answer evaluated successfully",
-
-      data: {
-        evaluation: result.evaluation,
-
-        provider: result.provider,
-        model: result.model,
-
-        interviewProgress: result.interviewProgress,
-      },
+      data: result,
     });
   } catch (error) {
-    console.error("Evaluate answer error:", error);
+    console.error("[INTERVIEW] EVALUATE ANSWER ERROR:", error);
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to evaluate answer",
+      message: error?.message || "Failed to evaluate answer",
+    });
+  }
+};
+
+// ============================================================
+// GET SINGLE EVALUATION
+// ============================================================
+
+const getEvaluation = async (req, res) => {
+  try {
+    const { id: interviewId, questionId } = req.params;
+
+    const result = await evaluationService.getEvaluation(
+      getUserId(req),
+      interviewId,
+      questionId,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] GET EVALUATION ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to fetch evaluation",
+    });
+  }
+};
+
+// ============================================================
+// GET ALL INTERVIEW EVALUATIONS
+// ============================================================
+
+const getInterviewEvaluations = async (req, res) => {
+  try {
+    const evaluations = await evaluationService.getInterviewEvaluations(
+      getUserId(req),
+      req.params.id,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: evaluations,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] GET EVALUATIONS ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to fetch interview evaluations",
     });
   }
 };
@@ -241,7 +420,7 @@ const evaluateInterviewAnswer = async (req, res) => {
 const completeInterview = async (req, res) => {
   try {
     const result = await interviewService.completeInterview(
-      req.user.id,
+      getUserId(req),
       req.params.id,
     );
 
@@ -251,11 +430,65 @@ const completeInterview = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    console.error("Complete interview error:", error);
+    console.error("[INTERVIEW] COMPLETE ERROR:", error);
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to complete interview",
+      message: error?.message || "Failed to complete interview",
+    });
+  }
+};
+
+// ============================================================
+// CANCEL INTERVIEW
+// ============================================================
+
+const cancelInterview = async (req, res) => {
+  try {
+    const exitReason = req.body?.exitReason || "user-exit";
+
+    const interview = await interviewService.cancelInterview(
+      getUserId(req),
+      req.params.id,
+      exitReason,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Interview cancelled successfully",
+      data: interview,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] CANCEL ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to cancel interview",
+    });
+  }
+};
+
+// ============================================================
+// GET INTERVIEW PROGRESS
+// ============================================================
+
+const getInterviewProgress = async (req, res) => {
+  try {
+    const progress = await interviewService.getInterviewProgress(
+      getUserId(req),
+      req.params.id,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: progress,
+    });
+  } catch (error) {
+    console.error("[INTERVIEW] PROGRESS ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Failed to fetch interview progress",
     });
   }
 };
@@ -271,7 +504,14 @@ module.exports = {
   startInterview,
   getInterviewQuestions,
   generateInterviewQuestion,
+  getNextQuestion,
   submitAnswer,
-  evaluateInterviewAnswer,
+  getAnswer,
+  getInterviewAnswers,
+  evaluateAnswer,
+  getEvaluation,
+  getInterviewEvaluations,
   completeInterview,
+  cancelInterview,
+  getInterviewProgress,
 };

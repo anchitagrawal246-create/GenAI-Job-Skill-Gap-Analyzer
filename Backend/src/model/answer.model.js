@@ -72,7 +72,7 @@ const answerSchema = new mongoose.Schema(
 // UNIQUE ANSWER PER QUESTION
 // ============================================================
 //
-// One interview question can have only one answer.
+// One interview question = one submitted answer.
 //
 // interview + question = unique
 //

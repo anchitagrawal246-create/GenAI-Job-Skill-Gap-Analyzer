@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 // ============================================================
@@ -26,6 +25,7 @@ const interviewSchema = new mongoose.Schema(
       type: String,
       trim: true,
       maxlength: 150,
+      default: "AI Interview",
     },
 
     // ==========================================================
@@ -40,14 +40,27 @@ const interviewSchema = new mongoose.Schema(
     },
 
     // ==========================================================
-    // EXPERIENCE LEVEL
+    // AI ESTIMATED EXPERIENCE LEVEL
     // ==========================================================
 
-    experienceLevel: {
+    // This is determined from demonstrated performance.
+    // It is NOT provided by the candidate.
+
+    estimatedExperienceLevel: {
       type: String,
       enum: ["fresher", "junior", "mid", "senior"],
-      required: true,
-      trim: true,
+      default: null,
+    },
+
+    // ==========================================================
+    // AI EXPERIENCE CONFIDENCE
+    // ==========================================================
+
+    experienceConfidence: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
     },
 
     // ==========================================================
@@ -56,30 +69,36 @@ const interviewSchema = new mongoose.Schema(
 
     interviewType: {
       type: String,
-      enum: [
-        "technical",
-        "behavioral",
-        "mixed",
-        "coding",
-        "system-design",
-      ],
+      enum: ["technical", "behavioral", "mixed", "coding", "system-design"],
       required: true,
       trim: true,
     },
 
     // ==========================================================
-    // DIFFICULTY
+    // DIFFICULTY MODE
     // ==========================================================
 
     difficulty: {
       type: String,
-      enum: ["easy", "medium", "hard"],
-      default: "medium",
+      enum: ["easy", "medium", "hard", "adaptive"],
+      default: "adaptive",
       trim: true,
     },
 
     // ==========================================================
-    // TECHNOLOGIES
+    // CURRENT AI DIFFICULTY
+    // ==========================================================
+
+    // Actual difficulty being used for the next/latest question.
+
+    currentDifficulty: {
+      type: String,
+      enum: ["easy", "medium", "hard"],
+      default: "medium",
+    },
+
+    // ==========================================================
+    // TECHNOLOGIES / SKILLS
     // ==========================================================
 
     technologies: {
@@ -87,26 +106,31 @@ const interviewSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: function (technologies) {
-          return technologies.length <= 30;
+          return Array.isArray(technologies) && technologies.length <= 30;
         },
         message: "Maximum 30 technologies are allowed",
       },
     },
 
     // ==========================================================
-    // QUESTION CONFIGURATION
+    // QUESTIONS GENERATED
     // ==========================================================
 
     totalQuestions: {
       type: Number,
-      min: 1,
-      max: 50,
-      default: 10,
+      min: 0,
+      max: 100,
+      default: 0,
     },
+
+    // ==========================================================
+    // QUESTIONS COMPLETED
+    // ==========================================================
 
     completedQuestions: {
       type: Number,
       min: 0,
+      max: 100,
       default: 0,
     },
 
@@ -122,13 +146,34 @@ const interviewSchema = new mongoose.Schema(
     },
 
     // ==========================================================
-    // TIMESTAMPS
+    // EXIT REASON
+    // ==========================================================
+
+    exitReason: {
+      type: String,
+      enum: [
+        "user-exit",
+        "page-closed",
+        "maximum-reached",
+        "completed",
+        "system-error",
+        null,
+      ],
+      default: null,
+    },
+
+    // ==========================================================
+    // START TIME
     // ==========================================================
 
     startedAt: {
       type: Date,
       default: null,
     },
+
+    // ==========================================================
+    // COMPLETION TIME
+    // ==========================================================
 
     completedAt: {
       type: Date,
@@ -148,71 +193,110 @@ const interviewSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // ============================================================
 // INDEXES
 // ============================================================
 
-// Quickly fetch a user's interviews sorted by creation date.
+// User's latest interviews
 interviewSchema.index({
   user: 1,
   createdAt: -1,
 });
 
-// Quickly find active interviews for a user.
+// Find active interviews
 interviewSchema.index({
   user: 1,
   status: 1,
 });
 
 // ============================================================
-// VALIDATION
+// DOCUMENT VALIDATION / NORMALIZATION
 // ============================================================
 
 interviewSchema.pre("validate", function () {
   // ----------------------------------------------------------
-  // completedQuestions cannot exceed totalQuestions
-  // ----------------------------------------------------------
-
-  if (this.completedQuestions > this.totalQuestions) {
-    throw new Error(
-      "Completed questions cannot exceed total questions"
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Completed interview must have completedAt
-  // ----------------------------------------------------------
-
-  if (this.status === "completed" && !this.completedAt) {
-    throw new Error(
-      "Completed interview must have completedAt"
-    );
-  }
-
-  // ----------------------------------------------------------
-  // In-progress interview must have startedAt
-  // ----------------------------------------------------------
-
-  if (this.status === "in-progress" && !this.startedAt) {
-    throw new Error(
-      "In-progress interview must have startedAt"
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Completed interview must have final score
+  // SAFE QUESTION COUNTS
   // ----------------------------------------------------------
 
   if (
-    this.status === "completed" &&
-    this.overallScore === null
+    typeof this.completedQuestions !== "number" ||
+    !Number.isFinite(this.completedQuestions)
   ) {
-    throw new Error(
-      "Completed interview must have an overall score"
-    );
+    this.completedQuestions = 0;
+  }
+
+  if (
+    typeof this.totalQuestions !== "number" ||
+    !Number.isFinite(this.totalQuestions)
+  ) {
+    this.totalQuestions = 0;
+  }
+
+  // ----------------------------------------------------------
+  // PREVENT NEGATIVE VALUES
+  // ----------------------------------------------------------
+
+  if (this.completedQuestions < 0) {
+    this.completedQuestions = 0;
+  }
+
+  if (this.totalQuestions < 0) {
+    this.totalQuestions = 0;
+  }
+
+  // ----------------------------------------------------------
+  // HARD MAXIMUM = 100
+  // ----------------------------------------------------------
+
+  if (this.totalQuestions > 100) {
+    this.totalQuestions = 100;
+  }
+
+  if (this.completedQuestions > 100) {
+    this.completedQuestions = 100;
+  }
+
+  // ----------------------------------------------------------
+  // COMPLETED QUESTIONS CANNOT EXCEED GENERATED QUESTIONS
+  // ----------------------------------------------------------
+
+  if (this.completedQuestions > this.totalQuestions) {
+    this.completedQuestions = this.totalQuestions;
+  }
+
+  // ----------------------------------------------------------
+  // STARTED INTERVIEW MUST HAVE startedAt
+  // ----------------------------------------------------------
+
+  if (this.status === "in-progress" && !this.startedAt) {
+    this.startedAt = new Date();
+  }
+
+  // ----------------------------------------------------------
+  // COMPLETED INTERVIEW MUST HAVE completedAt
+  // ----------------------------------------------------------
+
+  if (this.status === "completed" && !this.completedAt) {
+    this.completedAt = new Date();
+  }
+
+  // ----------------------------------------------------------
+  // COMPLETED INTERVIEW
+  // ----------------------------------------------------------
+
+  if (this.status === "completed") {
+    this.exitReason = "completed";
+  }
+
+  // ----------------------------------------------------------
+  // CANCELLED INTERVIEW
+  // ----------------------------------------------------------
+
+  if (this.status === "cancelled" && !this.exitReason) {
+    this.exitReason = "user-exit";
   }
 });
 

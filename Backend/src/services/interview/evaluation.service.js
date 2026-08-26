@@ -5,14 +5,41 @@ const Question = require("../../model/question.model");
 const { generateAIResponse } = require("../ai/ai.gateway");
 
 // ============================================================
+// CONSTANTS
+// ============================================================
+
+const MAX_QUESTIONS = 100;
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+const normalizeStringArray = (value, max = 10) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item) => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, max);
+};
+
+const validateScore = (value, fieldName) => {
+  const score = Number(value);
+
+  if (Number.isNaN(score) || score < 0 || score > 100) {
+    throw new Error(`Invalid ${fieldName} returned by AI`);
+  }
+
+  return Math.round(score);
+};
+
+// ============================================================
 // EVALUATE ANSWER
 // ============================================================
 
 const evaluateAnswer = async (userId, interviewId, questionId) => {
-  // ----------------------------------------------------------
-  // Find interview
-  // ----------------------------------------------------------
-
   const interview = await Interview.findOne({
     _id: interviewId,
     user: userId,
@@ -22,17 +49,9 @@ const evaluateAnswer = async (userId, interviewId, questionId) => {
     throw new Error("Interview not found");
   }
 
-  // ----------------------------------------------------------
-  // Interview must be in progress
-  // ----------------------------------------------------------
-
   if (interview.status !== "in-progress") {
     throw new Error("Interview is not in progress");
   }
-
-  // ----------------------------------------------------------
-  // Find question
-  // ----------------------------------------------------------
 
   const question = await Question.findOne({
     _id: questionId,
@@ -42,10 +61,6 @@ const evaluateAnswer = async (userId, interviewId, questionId) => {
   if (!question) {
     throw new Error("Question not found");
   }
-
-  // ----------------------------------------------------------
-  // Find answer
-  // ----------------------------------------------------------
 
   const answer = await Answer.findOne({
     interview: interviewId,
@@ -57,16 +72,12 @@ const evaluateAnswer = async (userId, interviewId, questionId) => {
     throw new Error("Answer not found");
   }
 
-  // ----------------------------------------------------------
-  // Validate answer
-  // ----------------------------------------------------------
-
   if (!answer.answerText || !answer.answerText.trim()) {
     throw new Error("Cannot evaluate an empty answer");
   }
 
   // ----------------------------------------------------------
-  // Prevent duplicate evaluation
+  // EXISTING EVALUATION
   // ----------------------------------------------------------
 
   const existingEvaluation = await Evaluation.findOne({
@@ -81,52 +92,53 @@ const evaluateAnswer = async (userId, interviewId, questionId) => {
       provider: existingEvaluation.evaluatedBy,
       model: null,
       alreadyEvaluated: true,
+      interviewProgress: null,
     };
   }
 
   // ----------------------------------------------------------
-  // Prevent evaluation while already processing
+  // PROCESSING
   // ----------------------------------------------------------
 
   if (answer.evaluationStatus === "processing") {
     throw new Error("Answer evaluation is already in progress");
   }
 
-  // ----------------------------------------------------------
-  // Mark answer as processing
-  // ----------------------------------------------------------
-
   answer.evaluationStatus = "processing";
+
   await answer.save();
 
   try {
-    // ========================================================
-    // AI EVALUATION PROMPT
-    // ========================================================
-
     const systemPrompt = `
-You are an expert technical interview evaluator.
+You are an expert AI technical interviewer and evaluator.
 
-Evaluate the candidate's answer against the interview question.
+Evaluate the candidate's answer against the question.
 
-Your evaluation must be fair, realistic, objective, and appropriate
-for the candidate's experience level.
+Evaluate ONLY what the candidate actually demonstrated.
+
+Do not invent skills, knowledge, experience or intent.
 
 ============================================================
-INTERVIEW DETAILS
+INTERVIEW
 ============================================================
 
 Role:
 ${interview.role}
 
-Experience Level:
-${interview.experienceLevel}
+AI Estimated Experience:
+${interview.estimatedExperienceLevel || "Not enough evidence"}
+
+Experience Confidence:
+${interview.experienceConfidence ?? "Not enough evidence"}
 
 Interview Type:
 ${interview.interviewType}
 
-Difficulty:
+Difficulty Mode:
 ${interview.difficulty}
+
+Current Question Difficulty:
+${question.difficulty}
 
 Technologies:
 ${(interview.technologies || []).join(", ")}
@@ -137,10 +149,10 @@ QUESTION
 
 ${question.question}
 
-Question Category:
+Category:
 ${question.category}
 
-Question Difficulty:
+Difficulty:
 ${question.difficulty}
 
 Expected Topics:
@@ -153,188 +165,89 @@ CANDIDATE ANSWER
 ${answer.answerText}
 
 ============================================================
-EVALUATION CRITERIA
+SCORING
 ============================================================
 
-1. correctnessScore
+correctnessScore:
+0-100
 
-How factually correct is the candidate's answer?
+technicalScore:
+0-100
 
-Score from 0 to 100.
+communicationScore:
+0-100
 
-2. technicalScore
+problemSolvingScore:
+0-100
 
-How well does the candidate demonstrate relevant technical
-knowledge?
+overallScore:
+0-100
 
-Score from 0 to 100.
-
-3. communicationScore
-
-How clearly and effectively is the answer communicated?
-
-Score from 0 to 100.
-
-4. problemSolvingScore
-
-How well does the answer demonstrate reasoning,
-problem-solving ability, and practical thinking?
-
-Score from 0 to 100.
-
-5. overallScore
-
-Overall quality of the candidate's answer considering the
-question, experience level, and difficulty.
-
-Score from 0 to 100.
+Consider the difficulty of the question and the
+knowledge actually demonstrated.
 
 ============================================================
 STRENGTHS
 ============================================================
 
-Identify what the candidate did correctly.
-
-Return concise and specific points.
-
-Do not praise things that are not actually present in the answer.
+Only return strengths actually demonstrated.
 
 ============================================================
 WEAKNESSES
 ============================================================
 
-Identify important weaknesses in the answer.
-
-Examples:
-
-- Missing technical details
-- Incorrect concepts
-- Incomplete implementation
-- Poor explanation
-- Missing edge cases
-- Missing practical considerations
-- Weak reasoning
-
-Only identify weaknesses supported by the candidate's answer.
+Only return weaknesses supported by the answer.
 
 ============================================================
 MISTAKES
 ============================================================
 
-Identify specific mistakes made by the candidate.
+Only return actual technical or logical mistakes.
 
-Only include actual mistakes or technically incorrect claims.
-
-Do not invent mistakes.
-
-If there are no significant mistakes, return an empty array.
+Return [] if there are no meaningful mistakes.
 
 ============================================================
 CORRECTIONS
 ============================================================
 
-For every important mistake or weakness, explain how the candidate
-could improve or correct it.
-
-Corrections should be practical and useful.
-
-Do not simply repeat the weakness.
+Provide practical corrections for important mistakes.
 
 ============================================================
-WHAT TO STUDY
+STUDY TOPICS
 ============================================================
 
-Identify technical topics the candidate should study based ONLY on:
+Recommend only topics related to actual weaknesses
+or demonstrated knowledge gaps.
 
-- mistakes
-- weaknesses
-- missing knowledge
-- incomplete understanding
+Each item:
 
-Do not recommend unrelated technologies.
-
-Each study topic must contain a priority.
-
-Priority rules:
-
-high:
-Major knowledge gap or important mistake.
-
-medium:
-Basic understanding exists but deeper understanding or practice
-is needed.
-
-low:
-Basic understanding is present but further improvement is useful.
-
-Return this structure:
-
-[
-  {
-    "topic": "MongoDB Indexing",
-    "priority": "high"
-  }
-]
+{
+  "topic": "Topic",
+  "priority": "low | medium | high"
+}
 
 ============================================================
 SUGGESTIONS
 ============================================================
 
-Provide actionable recommendations for improving future answers.
-
-Suggestions may include:
-
-- Writing code
-- Explaining implementation details
-- Discussing edge cases
-- Improving answer structure
-- Practicing concepts
-- Giving practical examples
-- Explaining trade-offs
+Provide practical advice for improving future answers.
 
 ============================================================
 FEEDBACK
 ============================================================
 
-Provide concise overall feedback.
+Brief overall feedback explaining:
 
-Explain:
-
-- What the candidate understood
-- What was missing
-- What should be improved
-
-Consider the candidate's experience level.
+- what was understood
+- what was correct
+- what was missing
+- what to improve
 
 ============================================================
-IMPORTANT RULES
+OUTPUT
 ============================================================
 
-1. Evaluate ONLY the candidate's answer.
-
-2. Do not invent information.
-
-3. Do not assume knowledge that the candidate did not demonstrate.
-
-4. Do not excessively penalize a fresher for not knowing advanced
-   concepts unless the question explicitly requires them.
-
-5. Do not give excessively high scores without justification.
-
-6. Do not give excessively low scores when the core concept is correct.
-
-7. Distinguish between an incorrect answer and an incomplete answer.
-
-8. If the answer is correct but lacks detail, identify the missing
-   detail instead of calling the entire answer wrong.
-
-9. Study topics must directly relate to weaknesses or knowledge gaps.
-
-10. Return ONLY valid JSON.
-
-============================================================
-JSON FORMAT
-============================================================
+Return ONLY valid JSON.
 
 {
   "correctnessScore": 0,
@@ -347,58 +260,44 @@ JSON FORMAT
   "mistakes": [],
   "corrections": [],
   "suggestions": [],
-  "studyTopics": [
-    {
-      "topic": "",
-      "priority": "low"
-    }
-  ],
+  "studyTopics": [],
   "feedback": ""
 }
-
-Return ONLY JSON.
 `;
-
-    // ========================================================
-    // SEND TO AI GATEWAY
-    // ========================================================
 
     const result = await generateAIResponse({
       systemPrompt,
+
       messages: [
         {
           role: "user",
           content: "Evaluate the candidate's answer.",
         },
       ],
+
       responseFormat: "json",
     });
-
-    // ========================================================
-    // VALIDATE AI RESPONSE
-    // ========================================================
 
     if (!result || !result.content) {
       throw new Error("AI provider returned an empty evaluation");
     }
 
-    // ========================================================
-    // PARSE JSON
-    // ========================================================
-
     let evaluationData;
 
     try {
-      evaluationData = JSON.parse(result.content);
+      evaluationData =
+        typeof result.content === "string"
+          ? JSON.parse(result.content)
+          : result.content;
     } catch (error) {
       console.error("[Evaluation Service] Invalid AI JSON:", result.content);
 
       throw new Error("AI provider returned invalid evaluation JSON");
     }
 
-    // ========================================================
+    // --------------------------------------------------------
     // VALIDATE SCORES
-    // ========================================================
+    // --------------------------------------------------------
 
     const scoreFields = [
       "correctnessScore",
@@ -409,29 +308,12 @@ Return ONLY JSON.
     ];
 
     for (const field of scoreFields) {
-      const value = Number(evaluationData[field]);
-
-      if (Number.isNaN(value) || value < 0 || value > 100) {
-        throw new Error(`Invalid ${field} returned by AI`);
-      }
-
-      evaluationData[field] = Math.round(value);
+      evaluationData[field] = validateScore(evaluationData[field], field);
     }
 
-    // ========================================================
+    // --------------------------------------------------------
     // NORMALIZE ARRAYS
-    // ========================================================
-
-    const normalizeStringArray = (value) => {
-      if (!Array.isArray(value)) {
-        return [];
-      }
-
-      return value
-        .filter((item) => typeof item === "string" && item.trim())
-        .map((item) => item.trim())
-        .slice(0, 10);
-    };
+    // --------------------------------------------------------
 
     const strengths = normalizeStringArray(evaluationData.strengths);
 
@@ -443,9 +325,9 @@ Return ONLY JSON.
 
     const suggestions = normalizeStringArray(evaluationData.suggestions);
 
-    // ========================================================
-    // VALIDATE STUDY TOPICS
-    // ========================================================
+    // --------------------------------------------------------
+    // STUDY TOPICS
+    // --------------------------------------------------------
 
     const studyTopics = Array.isArray(evaluationData.studyTopics)
       ? evaluationData.studyTopics
@@ -453,87 +335,95 @@ Return ONLY JSON.
             (item) =>
               item &&
               typeof item.topic === "string" &&
-              item.topic.trim() &&
+              item.topic.trim().length > 0 &&
               ["low", "medium", "high"].includes(item.priority),
           )
           .map((item) => ({
-            topic: item.topic.trim(),
+            topic: item.topic.trim().slice(0, 150),
+
             priority: item.priority,
           }))
           .slice(0, 10)
       : [];
 
-    // ========================================================
-    // NORMALIZE FEEDBACK
-    // ========================================================
+    // --------------------------------------------------------
+    // FEEDBACK
+    // --------------------------------------------------------
 
     const feedback =
       typeof evaluationData.feedback === "string"
-        ? evaluationData.feedback.trim()
+        ? evaluationData.feedback.trim().slice(0, 5000)
         : "";
 
-    // ========================================================
+    // --------------------------------------------------------
     // CREATE EVALUATION
-    // ========================================================
+    // --------------------------------------------------------
 
-    const evaluation = await Evaluation.create({
-      interview: interviewId,
-      question: questionId,
-      answer: answer._id,
+    let evaluation;
 
-      // ------------------------------------------------------
-      // Scores
-      // ------------------------------------------------------
+    try {
+      evaluation = await Evaluation.create({
+        interview: interviewId,
+        question: questionId,
+        answer: answer._id,
 
-      correctnessScore: evaluationData.correctnessScore,
+        correctnessScore: evaluationData.correctnessScore,
 
-      technicalScore: evaluationData.technicalScore,
+        technicalScore: evaluationData.technicalScore,
 
-      communicationScore: evaluationData.communicationScore,
+        communicationScore: evaluationData.communicationScore,
 
-      problemSolvingScore: evaluationData.problemSolvingScore,
+        problemSolvingScore: evaluationData.problemSolvingScore,
 
-      overallScore: evaluationData.overallScore,
+        overallScore: evaluationData.overallScore,
 
-      // ------------------------------------------------------
-      // Analysis
-      // ------------------------------------------------------
+        strengths,
+        weaknesses,
+        mistakes,
+        corrections,
+        suggestions,
+        studyTopics,
+        feedback,
 
-      strengths,
-      weaknesses,
-      mistakes,
-      corrections,
-      suggestions,
+        evaluatedBy: result.provider || "manual",
+      });
+    } catch (error) {
+      if (error.code === 11000) {
+        const duplicateEvaluation = await Evaluation.findOne({
+          interview: interviewId,
+          question: questionId,
+          answer: answer._id,
+        });
 
-      // ------------------------------------------------------
-      // Study recommendations
-      // ------------------------------------------------------
+        if (duplicateEvaluation) {
+          answer.evaluationStatus = "completed";
 
-      studyTopics,
+          await answer.save();
 
-      // ------------------------------------------------------
-      // Overall feedback
-      // ------------------------------------------------------
+          return {
+            evaluation: duplicateEvaluation,
+            provider: duplicateEvaluation.evaluatedBy,
+            model: null,
+            alreadyEvaluated: true,
+            interviewProgress: null,
+          };
+        }
+      }
 
-      feedback,
+      throw error;
+    }
 
-      // ------------------------------------------------------
-      // AI provider
-      // ------------------------------------------------------
-
-      evaluatedBy: result.provider,
-    });
-
-    // ========================================================
-    // MARK ANSWER AS EVALUATED
-    // ========================================================
+    // --------------------------------------------------------
+    // MARK ANSWER COMPLETE
+    // --------------------------------------------------------
 
     answer.evaluationStatus = "completed";
+
     await answer.save();
 
-    // ========================================================
-    // MARK QUESTION AS EVALUATED
-    // ========================================================
+    // --------------------------------------------------------
+    // MARK QUESTION ANSWERED
+    // --------------------------------------------------------
 
     await Question.findOneAndUpdate(
       {
@@ -541,17 +431,23 @@ Return ONLY JSON.
         interview: interviewId,
       },
       {
-        status: "evaluated",
+        $set: {
+          status: "answered",
+        },
       },
     );
 
-    // ========================================================
-    // UPDATE INTERVIEW PROGRESS
-    // ========================================================
+    // --------------------------------------------------------
+    // COUNT EVALUATIONS
+    // --------------------------------------------------------
 
     const completedQuestions = await Evaluation.countDocuments({
       interview: interviewId,
     });
+
+    // --------------------------------------------------------
+    // UPDATE INTERVIEW PROGRESS
+    // --------------------------------------------------------
 
     await Interview.findOneAndUpdate(
       {
@@ -559,38 +455,107 @@ Return ONLY JSON.
         user: userId,
       },
       {
-        completedQuestions,
+        $set: {
+          completedQuestions: Math.min(completedQuestions, MAX_QUESTIONS),
+
+          totalQuestions: Math.min(
+            await Question.countDocuments({
+              interview: interviewId,
+            }),
+            MAX_QUESTIONS,
+          ),
+        },
       },
     );
 
-    // ========================================================
-    // RETURN RESULT
-    // ========================================================
+    // --------------------------------------------------------
+    // CHECK MAXIMUM
+    // --------------------------------------------------------
+
+    const reachedMaximum = completedQuestions >= MAX_QUESTIONS;
+
+    // --------------------------------------------------------
+    // AUTO COMPLETE AT Q100
+    // --------------------------------------------------------
+
+    if (reachedMaximum) {
+      const allEvaluations = await Evaluation.find({
+        interview: interviewId,
+      }).lean();
+
+      const totalScore = allEvaluations.reduce(
+        (sum, item) => sum + Number(item.overallScore || 0),
+        0,
+      );
+
+      const overallScore = allEvaluations.length
+        ? Math.round(totalScore / allEvaluations.length)
+        : 0;
+
+      await Interview.findOneAndUpdate(
+        {
+          _id: interviewId,
+          user: userId,
+          status: "in-progress",
+        },
+        {
+          $set: {
+            status: "completed",
+
+            completedAt: new Date(),
+
+            completedQuestions: Math.min(allEvaluations.length, MAX_QUESTIONS),
+
+            totalQuestions: Math.min(allEvaluations.length, MAX_QUESTIONS),
+
+            overallScore,
+
+            exitReason: "maximum-reached",
+          },
+        },
+      );
+    }
+
+    // --------------------------------------------------------
+    // PROGRESS
+    // --------------------------------------------------------
+
+    const totalQuestions = await Question.countDocuments({
+      interview: interviewId,
+    });
+
+    const interviewProgress = {
+      completedQuestions,
+
+      totalQuestions: Math.min(totalQuestions, MAX_QUESTIONS),
+
+      remainingQuestions: Math.max(MAX_QUESTIONS - completedQuestions, 0),
+
+      isLastQuestion: completedQuestions >= MAX_QUESTIONS,
+
+      percentage: Math.min(
+        100,
+        Math.round((completedQuestions / MAX_QUESTIONS) * 100),
+      ),
+
+      interviewCompleted: reachedMaximum,
+    };
 
     return {
       evaluation,
 
-      provider: result.provider,
+      provider: result.provider || "unknown",
 
-      model: result.model,
+      model: result.model || null,
 
-      interviewProgress: {
-        completedQuestions,
-        totalQuestions: interview.totalQuestions,
-        remainingQuestions: Math.max(
-          interview.totalQuestions - completedQuestions,
-          0,
-        ),
-        isLastQuestion: completedQuestions >= interview.totalQuestions,
-      },
+      alreadyEvaluated: false,
+
+      interviewProgress,
     };
   } catch (error) {
-    // ========================================================
-    // MARK ANSWER EVALUATION AS FAILED
-    // ========================================================
-
     try {
       answer.evaluationStatus = "failed";
+
       await answer.save();
     } catch (saveError) {
       console.error(
@@ -604,14 +569,10 @@ Return ONLY JSON.
 };
 
 // ============================================================
-// GET EVALUATION
+// GET SINGLE EVALUATION
 // ============================================================
 
 const getEvaluation = async (userId, interviewId, questionId) => {
-  // ----------------------------------------------------------
-  // Verify interview ownership
-  // ----------------------------------------------------------
-
   const interview = await Interview.findOne({
     _id: interviewId,
     user: userId,
@@ -620,10 +581,6 @@ const getEvaluation = async (userId, interviewId, questionId) => {
   if (!interview) {
     throw new Error("Interview not found");
   }
-
-  // ----------------------------------------------------------
-  // Find evaluation
-  // ----------------------------------------------------------
 
   const evaluation = await Evaluation.findOne({
     interview: interviewId,
@@ -645,10 +602,6 @@ const getEvaluation = async (userId, interviewId, questionId) => {
 // ============================================================
 
 const getInterviewEvaluations = async (userId, interviewId) => {
-  // ----------------------------------------------------------
-  // Verify interview ownership
-  // ----------------------------------------------------------
-
   const interview = await Interview.findOne({
     _id: interviewId,
     user: userId,
@@ -657,10 +610,6 @@ const getInterviewEvaluations = async (userId, interviewId) => {
   if (!interview) {
     throw new Error("Interview not found");
   }
-
-  // ----------------------------------------------------------
-  // Get evaluations
-  // ----------------------------------------------------------
 
   return Evaluation.find({
     interview: interviewId,

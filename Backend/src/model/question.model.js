@@ -26,6 +26,7 @@ const questionSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 1,
+      max: 100,
     },
 
     // ==========================================================
@@ -77,7 +78,7 @@ const questionSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: function (topics) {
-          return topics.length <= 10;
+          return Array.isArray(topics) && topics.length <= 10;
         },
         message: "A maximum of 10 expected topics is allowed",
       },
@@ -104,7 +105,6 @@ const questionSchema = new mongoose.Schema(
 // ============================================================
 
 // Every question number must be unique inside an interview.
-
 questionSchema.index(
   {
     interview: 1,
@@ -115,8 +115,7 @@ questionSchema.index(
   }
 );
 
-// Useful when checking pending/answered questions.
-
+// Useful when checking pending / answered questions.
 questionSchema.index({
   interview: 1,
   status: 1,
@@ -125,17 +124,28 @@ questionSchema.index({
 // ============================================================
 // NORMALIZE EXPECTED TOPICS
 // ============================================================
+//
+// IMPORTANT:
+// Do NOT use next() here.
+// ============================================================
 
 questionSchema.pre("validate", function () {
+  // Normalize expected topics.
   if (Array.isArray(this.expectedTopics)) {
     this.expectedTopics = this.expectedTopics
       .filter(
         (topic) =>
-          typeof topic === "string" &&
-          topic.trim().length > 0
+          typeof topic === "string" && topic.trim().length > 0
       )
       .map((topic) => topic.trim())
       .slice(0, 10);
+  }
+
+  // Safety check.
+  if (this.questionNumber > 100) {
+    throw new Error(
+      "An interview cannot contain more than 100 questions"
+    );
   }
 });
 

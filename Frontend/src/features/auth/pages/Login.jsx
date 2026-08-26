@@ -118,7 +118,7 @@ const Login = () => {
 
         // Navigate to success page
         setTimeout(() => {
-          navigate("/success", {
+          navigate("/dashboard", {
             replace: true,
           });
         }, 700);
