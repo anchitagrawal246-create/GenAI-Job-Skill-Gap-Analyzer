@@ -1,17 +1,34 @@
 import { createBrowserRouter } from "react-router-dom";
 
+// =====================================================
+// AUTH
+// =====================================================
 import Login from "./features/auth/pages/Login";
 import Register from "./features/auth/pages/Register";
-import Landing from "./features/home/landing";
 import ForgotPassword from "./features/auth/pages/ForgotPassword";
 import ResetPassword from "./features/auth/pages/ResetPassword";
-import Success from "./features/auth/components/Dashboard";
 import ForgotUserId from "./features/auth/pages/ForgotUserId";
 
+// =====================================================
+// HOME
+// =====================================================
+import Landing from "./features/home/landing";
 import Dashboard from "./features/home/dashboard";
 import { Profile } from "./features/home/Profile";
+
+// =====================================================
+// INTERVIEW
+// =====================================================
 import InterviewAgent from "./features/home/InterviewAgent";
 
+// =====================================================
+// OTHER
+// =====================================================
+import Success from "./features/auth/components/Dashboard";
+
+// =====================================================
+// ROUTER
+// =====================================================
 export const router = createBrowserRouter([
   // =====================================================
   // HOME
@@ -28,18 +45,22 @@ export const router = createBrowserRouter([
     path: "/login",
     element: <Login />,
   },
+
   {
     path: "/register",
     element: <Register />,
   },
+
   {
     path: "/forgot-password",
     element: <ForgotPassword />,
   },
+
   {
     path: "/reset-password",
     element: <ResetPassword />,
   },
+
   {
     path: "/forgot-user-id",
     element: <ForgotUserId />,
@@ -52,6 +73,7 @@ export const router = createBrowserRouter([
     path: "/success",
     element: <Success />,
   },
+
   {
     path: "/dashboard",
     element: <Dashboard />,

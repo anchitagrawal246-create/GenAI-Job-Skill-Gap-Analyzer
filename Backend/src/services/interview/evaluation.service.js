@@ -1,7 +1,10 @@
+const mongoose = require("mongoose");
+
 const Evaluation = require("../../model/evaluation.model");
 const Answer = require("../../model/answer.model");
 const Interview = require("../../model/interview.model");
 const Question = require("../../model/question.model");
+
 const { generateAIResponse } = require("../ai/ai.gateway");
 
 // ============================================================
@@ -9,49 +12,269 @@ const { generateAIResponse } = require("../ai/ai.gateway");
 // ============================================================
 
 const MAX_QUESTIONS = 100;
+const MAX_ARRAY_ITEMS = 30;
+const MAX_ANSWER_LENGTH = 50000;
+
+const PROVIDERS = ["groq", "gemini", "deepseek", "ollama", "openai", "manual"];
+
+const CANDIDATE_LEVELS = ["beginner", "knight", "conqueror"];
+
+const SCORE_HISTORY_REASONS = [
+  "initial-evaluation",
+  "question-re-evaluation",
+  "full-re-evaluation",
+  "manual-recalculation",
+  "final-calculation",
+];
+
+const PROMPT_VERSION = "evaluation-service-v6";
 
 // ============================================================
-// HELPERS
+// DEBUG
 // ============================================================
 
-const normalizeStringArray = (value, max = 10) => {
+const debug = (message, data = null) => {
+  console.log(`[EVALUATION] ${message}`);
+
+  if (data !== null) {
+    console.log(data);
+  }
+};
+
+const debugError = (message, error = null) => {
+  console.error(`[EVALUATION ERROR] ${message}`);
+
+  if (error) {
+    console.error(error?.stack || error?.message || error);
+  }
+};
+
+// ============================================================
+// OBJECT ID
+// ============================================================
+
+const validateObjectId = (id, fieldName) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error(`Invalid ${fieldName}`);
+  }
+
+  return id;
+};
+
+// ============================================================
+// REFERENCE ID HELPER
+// Supports:
+//   ObjectId
+//   populated document
+//   string
+// ============================================================
+
+const getRefId = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "object" && value._id) {
+    return String(value._id);
+  }
+
+  return String(value);
+};
+
+// ============================================================
+// TEXT HELPERS
+// ============================================================
+
+const cleanText = (value, maxLength = MAX_ANSWER_LENGTH) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, maxLength);
+};
+
+const normalizeStringArray = (value, max = MAX_ARRAY_ITEMS) => {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value
-    .filter((item) => typeof item === "string" && item.trim().length > 0)
-    .map((item) => item.trim())
-    .slice(0, max);
+  return [
+    ...new Set(
+      value
+        .filter((item) => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim()),
+    ),
+  ].slice(0, max);
 };
 
-const validateScore = (value, fieldName) => {
+// ============================================================
+// NUMBER HELPERS
+// ============================================================
+
+const clampScore = (value, fieldName) => {
   const score = Number(value);
 
-  if (Number.isNaN(score) || score < 0 || score > 100) {
+  if (!Number.isFinite(score) || score < 0 || score > 100) {
     throw new Error(`Invalid ${fieldName} returned by AI`);
   }
 
-  return Math.round(score);
+  return Math.round(score * 100) / 100;
+};
+
+const average = (values = []) => {
+  const valid = values.map(Number).filter(Number.isFinite);
+
+  if (!valid.length) {
+    return null;
+  }
+
+  const total = valid.reduce((sum, value) => sum + value, 0);
+
+  return Math.round((total / valid.length) * 100) / 100;
 };
 
 // ============================================================
-// EVALUATE ANSWER
+// JSON PARSER
 // ============================================================
 
-const evaluateAnswer = async (userId, interviewId, questionId) => {
+const parseAIJson = (content) => {
+  if (typeof content !== "string") {
+    return null;
+  }
+
+  const trimmed = content.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  // Direct JSON
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    // continue
+  }
+
+  // Markdown JSON block
+  const cleaned = trimmed
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    return null;
+  }
+};
+
+// ============================================================
+// LATEST EVALUATION PER QUESTION
+// ============================================================
+
+const getLatestEvaluations = (evaluations = []) => {
+  const map = new Map();
+
+  for (const evaluation of evaluations) {
+    const questionId = getRefId(evaluation?.question);
+
+    if (!questionId) {
+      continue;
+    }
+
+    const existing = map.get(questionId);
+
+    if (!existing) {
+      map.set(questionId, evaluation);
+      continue;
+    }
+
+    const currentVersion = Number(evaluation?.version) || 1;
+
+    const existingVersion = Number(existing?.version) || 1;
+
+    if (currentVersion > existingVersion) {
+      map.set(questionId, evaluation);
+      continue;
+    }
+
+    if (
+      currentVersion === existingVersion &&
+      new Date(evaluation?.createdAt || 0) > new Date(existing?.createdAt || 0)
+    ) {
+      map.set(questionId, evaluation);
+    }
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a?.createdAt || 0) - new Date(b?.createdAt || 0),
+  );
+};
+
+// ============================================================
+// ORIGINAL EVALUATION PER QUESTION
+// ============================================================
+
+const getOriginalEvaluations = (evaluations = []) => {
+  const map = new Map();
+
+  for (const evaluation of evaluations) {
+    if (evaluation?.evaluationType !== "original") {
+      continue;
+    }
+
+    const questionId = getRefId(evaluation?.question);
+
+    if (!questionId) {
+      continue;
+    }
+
+    const existing = map.get(questionId);
+
+    if (!existing) {
+      map.set(questionId, evaluation);
+      continue;
+    }
+
+    if (
+      new Date(evaluation?.createdAt || 0) < new Date(existing?.createdAt || 0)
+    ) {
+      map.set(questionId, evaluation);
+    }
+  }
+
+  return Array.from(map.values());
+};
+
+// ============================================================
+// OWNED INTERVIEW
+// ============================================================
+
+const getOwnedInterview = async (userId, interviewId) => {
+  validateObjectId(userId, "user ID");
+  validateObjectId(interviewId, "interview ID");
+
   const interview = await Interview.findOne({
     _id: interviewId,
     user: userId,
-  }).lean();
+  });
 
   if (!interview) {
     throw new Error("Interview not found");
   }
 
-  if (interview.status !== "in-progress") {
-    throw new Error("Interview is not in progress");
-  }
+  return interview;
+};
+
+// ============================================================
+// QUESTION
+// ============================================================
+
+const getInterviewQuestion = async (interviewId, questionId) => {
+  validateObjectId(interviewId, "interview ID");
+
+  validateObjectId(questionId, "question ID");
 
   const question = await Question.findOne({
     _id: questionId,
@@ -62,186 +285,302 @@ const evaluateAnswer = async (userId, interviewId, questionId) => {
     throw new Error("Question not found");
   }
 
-  const answer = await Answer.findOne({
-    interview: interviewId,
-    question: questionId,
-    user: userId,
-  });
+  return question;
+};
 
-  if (!answer) {
-    throw new Error("Answer not found");
+// ============================================================
+// CANDIDATE ANSWER EXTRACTION
+// IMPORTANT:
+// coding/debugging -> answer.code
+// text             -> answer.answerText
+// ============================================================
+
+const getCandidateAnswerText = (answer, question) => {
+  const category = question?.category;
+
+  if (category === "coding" || category === "dsa" || category === "debugging") {
+    return cleanText(answer?.code);
   }
 
-  if (!answer.answerText || !answer.answerText.trim()) {
-    throw new Error("Cannot evaluate an empty answer");
+  return cleanText(answer?.answerText);
+};
+
+// ============================================================
+// EVALUATION PROMPT
+// ============================================================
+
+const buildEvaluationPrompt = ({
+  interview,
+  question,
+  answer,
+  evaluationType,
+  version,
+}) => {
+  const candidateAnswer = getCandidateAnswerText(answer, question);
+
+  const language =
+    question?.coding?.language ||
+    question?.debugging?.language ||
+    answer?.language ||
+    "unknown";
+
+  const isCoding =
+    question?.category === "coding" || question?.category === "dsa";
+
+  const isDebugging = question?.category === "debugging";
+
+  let codingContext = "";
+
+  if (isCoding) {
+    codingContext = `
+============================================================
+CODING QUESTION DATA
+============================================================
+
+Language:
+${language}
+
+Starter Code:
+${question?.coding?.starterCode || "Not provided"}
+
+Function Signature:
+${question?.coding?.functionSignature || "Not provided"}
+
+Input Format:
+${question?.coding?.inputFormat || "Not provided"}
+
+Output Format:
+${question?.coding?.outputFormat || "Not provided"}
+
+Correct Solution:
+${question?.solution || question?.idealAnswer || "Not available"}
+
+Time Complexity:
+${question?.complexity?.time || "Not provided"}
+
+Space Complexity:
+${question?.complexity?.space || "Not provided"}
+
+Candidate Submission:
+${candidateAnswer || "No submission provided"}
+`;
   }
 
-  // ----------------------------------------------------------
-  // EXISTING EVALUATION
-  // ----------------------------------------------------------
+  let debuggingContext = "";
 
-  const existingEvaluation = await Evaluation.findOne({
-    interview: interviewId,
-    question: questionId,
-    answer: answer._id,
-  });
+  if (isDebugging) {
+    debuggingContext = `
+============================================================
+DEBUGGING QUESTION DATA
+============================================================
 
-  if (existingEvaluation) {
-    return {
-      evaluation: existingEvaluation,
-      provider: existingEvaluation.evaluatedBy,
-      model: null,
-      alreadyEvaluated: true,
-      interviewProgress: null,
-    };
+Language:
+${language}
+
+Broken Code:
+${question?.debugging?.buggyCode || "Not provided"}
+
+Expected Behavior:
+${question?.debugging?.expectedBehavior || "Not provided"}
+
+Root Bug Description:
+${question?.debugging?.bugDescription || "Not provided"}
+
+Correct Solution:
+${question?.solution || question?.idealAnswer || "Not available"}
+
+Candidate Response / Fixed Code:
+${candidateAnswer || "No response provided"}
+`;
   }
 
-  // ----------------------------------------------------------
-  // PROCESSING
-  // ----------------------------------------------------------
-
-  if (answer.evaluationStatus === "processing") {
-    throw new Error("Answer evaluation is already in progress");
-  }
-
-  answer.evaluationStatus = "processing";
-
-  await answer.save();
-
-  try {
-    const systemPrompt = `
-You are an expert AI technical interviewer and evaluator.
-
-Evaluate the candidate's answer against the question.
+  return `
+You are an expert technical interview evaluator.
 
 Evaluate ONLY what the candidate actually demonstrated.
 
-Do not invent skills, knowledge, experience or intent.
+Do not invent:
+- skills
+- knowledge
+- experience
+- intent
+- reasoning that was not demonstrated
+
+A skipped question is not evidence of weakness.
+
+The candidate answer below is the only candidate evidence.
+
+============================================================
+EVALUATION INFORMATION
+============================================================
+
+Evaluation Type:
+${evaluationType}
+
+Evaluation Version:
+${version}
 
 ============================================================
 INTERVIEW
 ============================================================
 
 Role:
-${interview.role}
-
-AI Estimated Experience:
-${interview.estimatedExperienceLevel || "Not enough evidence"}
-
-Experience Confidence:
-${interview.experienceConfidence ?? "Not enough evidence"}
+${interview?.role || "Not provided"}
 
 Interview Type:
-${interview.interviewType}
+${interview?.interviewType || "Not provided"}
 
 Difficulty Mode:
-${interview.difficulty}
+${interview?.difficulty || "Not provided"}
 
-Current Question Difficulty:
-${question.difficulty}
+Question Difficulty:
+${question?.difficulty || "Not provided"}
 
 Technologies:
-${(interview.technologies || []).join(", ")}
+${
+  Array.isArray(interview?.technologies) && interview.technologies.length
+    ? interview.technologies.join(", ")
+    : "Not specified"
+}
 
 ============================================================
 QUESTION
 ============================================================
 
-${question.question}
+${question?.question || ""}
 
 Category:
-${question.category}
+${question?.category || "technical"}
 
-Difficulty:
-${question.difficulty}
+Skill:
+${question?.skill || "Not specified"}
 
 Expected Topics:
-${(question.expectedTopics || []).join(", ")}
+${
+  Array.isArray(question?.expectedTopics) && question.expectedTopics.length
+    ? question.expectedTopics.join(", ")
+    : "None"
+}
+
+Ideal Answer:
+${question?.idealAnswer || question?.solution || "Not provided"}
+
+Explanation:
+${question?.explanation || "Not provided"}
+
+${codingContext}
+
+${debuggingContext}
 
 ============================================================
 CANDIDATE ANSWER
 ============================================================
 
-${answer.answerText}
+${candidateAnswer || "No answer provided"}
 
 ============================================================
-SCORING
+SCORING RULES
 ============================================================
+
+Return every score from 0 to 100.
 
 correctnessScore:
-0-100
+How factually, logically, and technically correct is the answer?
 
 technicalScore:
-0-100
+How strong is the technical understanding demonstrated?
 
 communicationScore:
-0-100
+How clearly and effectively is the answer communicated?
 
 problemSolvingScore:
-0-100
+How well does the answer demonstrate reasoning and problem solving?
 
 overallScore:
-0-100
+Overall quality relative to the difficulty of the question.
 
-Consider the difficulty of the question and the
-knowledge actually demonstrated.
+Important:
+
+1. Judge demonstrated evidence only.
+
+2. Do not reward unsupported claims.
+
+3. Difficulty matters.
+
+4. A correct answer to a very easy question should not automatically receive the same interpretation as a correct answer to a very hard question.
+
+5. For coding/debugging:
+   - compare against the stored solution
+   - inspect correctness
+   - inspect edge cases
+   - inspect efficiency
+   - inspect reasoning when present
+   - do not award credit for code the candidate did not submit
+
+6. A partially correct answer should receive a partial score.
+
+7. If an answer is completely incorrect, score it accordingly.
+
+8. Re-evaluation must evaluate the CURRENT candidate answer provided above.
+
+   Do not reuse a previous candidate answer.
 
 ============================================================
 STRENGTHS
 ============================================================
 
-Only return strengths actually demonstrated.
+Only include strengths directly supported by the answer.
 
 ============================================================
 WEAKNESSES
 ============================================================
 
-Only return weaknesses supported by the answer.
+Only include weaknesses supported by the answer.
 
 ============================================================
 MISTAKES
 ============================================================
 
-Only return actual technical or logical mistakes.
+Only include actual technical, logical, or communication mistakes.
 
-Return [] if there are no meaningful mistakes.
+Return [] when there are no meaningful mistakes.
 
 ============================================================
 CORRECTIONS
 ============================================================
 
-Provide practical corrections for important mistakes.
-
-============================================================
-STUDY TOPICS
-============================================================
-
-Recommend only topics related to actual weaknesses
-or demonstrated knowledge gaps.
-
-Each item:
-
-{
-  "topic": "Topic",
-  "priority": "low | medium | high"
-}
+Provide practical corrections for actual mistakes.
 
 ============================================================
 SUGGESTIONS
 ============================================================
 
-Provide practical advice for improving future answers.
+Provide practical advice for improving future interview answers.
+
+============================================================
+STUDY TOPICS
+============================================================
+
+Only recommend topics related to demonstrated weaknesses or actual knowledge gaps.
+
+Each study topic:
+
+{
+  "topic": "string",
+  "priority": "low | medium | high"
+}
 
 ============================================================
 FEEDBACK
 ============================================================
 
-Brief overall feedback explaining:
+Provide concise useful feedback covering:
 
-- what was understood
+- what the candidate understood
 - what was correct
+- what was incorrect
 - what was missing
-- what to improve
+- how the candidate can improve
 
 ============================================================
 OUTPUT
@@ -264,148 +603,1187 @@ Return ONLY valid JSON.
   "feedback": ""
 }
 `;
+};
 
-    const result = await generateAIResponse({
-      systemPrompt,
+// ============================================================
+// VALIDATE AI EVALUATION
+// ============================================================
 
-      messages: [
-        {
-          role: "user",
-          content: "Evaluate the candidate's answer.",
-        },
-      ],
+const validateEvaluationData = (data) => {
+  if (!data || typeof data !== "object") {
+    throw new Error("AI returned an invalid evaluation object");
+  }
 
-      responseFormat: "json",
+  const scoreFields = [
+    "correctnessScore",
+    "technicalScore",
+    "communicationScore",
+    "problemSolvingScore",
+    "overallScore",
+  ];
+
+  for (const field of scoreFields) {
+    if (data[field] === undefined || data[field] === null) {
+      throw new Error(`AI evaluation is missing ${field}`);
+    }
+
+    data[field] = clampScore(data[field], field);
+  }
+
+  return data;
+};
+
+// ============================================================
+// NORMALIZE EVALUATION
+// ============================================================
+
+const normalizeEvaluation = (data) => {
+  const strengths = normalizeStringArray(data?.strengths, 20);
+
+  const weaknesses = normalizeStringArray(data?.weaknesses, 20);
+
+  const mistakes = normalizeStringArray(data?.mistakes, 30);
+
+  const corrections = normalizeStringArray(data?.corrections, 30);
+
+  const suggestions = normalizeStringArray(data?.suggestions, 30);
+
+  const studyTopics = Array.isArray(data?.studyTopics)
+    ? data.studyTopics
+        .filter(
+          (item) =>
+            item &&
+            typeof item.topic === "string" &&
+            item.topic.trim().length > 0 &&
+            ["low", "medium", "high"].includes(item.priority),
+        )
+        .map((item) => ({
+          topic: cleanText(item.topic, 150),
+          priority: item.priority,
+        }))
+        .slice(0, 30)
+    : [];
+
+  return {
+    correctnessScore: data.correctnessScore,
+
+    technicalScore: data.technicalScore,
+
+    communicationScore: data.communicationScore,
+
+    problemSolvingScore: data.problemSolvingScore,
+
+    overallScore: data.overallScore,
+
+    strengths,
+    weaknesses,
+    mistakes,
+    corrections,
+    suggestions,
+    studyTopics,
+
+    feedback: cleanText(data?.feedback, 5000),
+  };
+};
+
+// ============================================================
+// CANDIDATE LEVEL
+// ============================================================
+
+const calculateCandidateLevel = ({
+  currentEvaluations = [],
+  questions = [],
+}) => {
+  if (!currentEvaluations.length) {
+    return {
+      level: null,
+      score: null,
+      confidence: null,
+    };
+  }
+
+  const score = average(
+    currentEvaluations.map((evaluation) => evaluation?.overallScore),
+  );
+
+  if (score === null) {
+    return {
+      level: null,
+      score: null,
+      confidence: null,
+    };
+  }
+
+  const evaluationMap = new Map();
+
+  for (const evaluation of currentEvaluations) {
+    const questionId = getRefId(evaluation?.question);
+
+    if (questionId) {
+      evaluationMap.set(questionId, evaluation);
+    }
+  }
+
+  let hardQuestions = 0;
+  let veryHardQuestions = 0;
+  let strongAdvancedAnswers = 0;
+
+  for (const question of questions) {
+    if (!question?._id) {
+      continue;
+    }
+
+    if (question.difficulty === "hard") {
+      hardQuestions++;
+    }
+
+    if (question.difficulty === "very-hard") {
+      veryHardQuestions++;
+    }
+
+    if (question.difficulty === "hard" || question.difficulty === "very-hard") {
+      const evaluation = evaluationMap.get(String(question._id));
+
+      if (evaluation && Number(evaluation.overallScore) >= 75) {
+        strongAdvancedAnswers++;
+      }
+    }
+  }
+
+  let level = "beginner";
+
+  if (score >= 85 && hardQuestions >= 3 && strongAdvancedAnswers >= 2) {
+    level = "conqueror";
+  } else if (
+    score >= 60 &&
+    (hardQuestions >= 1 ||
+      veryHardQuestions >= 1 ||
+      currentEvaluations.length >= 5)
+  ) {
+    level = "knight";
+  }
+
+  let confidence = 30 + currentEvaluations.length * 6;
+
+  if (hardQuestions >= 2) {
+    confidence += 10;
+  }
+
+  if (strongAdvancedAnswers >= 2) {
+    confidence += 10;
+  }
+
+  if (veryHardQuestions >= 1) {
+    confidence += 5;
+  }
+
+  confidence = Math.min(95, Math.max(30, confidence));
+
+  return {
+    level: CANDIDATE_LEVELS.includes(level) ? level : "beginner",
+    score,
+    confidence,
+  };
+};
+
+// ============================================================
+// SCORE HISTORY
+// ============================================================
+
+const appendScoreHistory = ({
+  history,
+  version,
+  score,
+  reason,
+  changedQuestionId = null,
+}) => {
+  if (!Array.isArray(history) || !Number.isFinite(Number(score))) {
+    return;
+  }
+
+  if (!SCORE_HISTORY_REASONS.includes(reason)) {
+    return;
+  }
+
+  history.push({
+    version,
+    score,
+    reason,
+    changedQuestionId: changedQuestionId || null,
+    calculatedAt: new Date(),
+  });
+};
+
+// ============================================================
+// CANDIDATE LEVEL HISTORY
+// ============================================================
+
+const appendCandidateLevelHistory = ({
+  interview,
+  level,
+  score,
+  confidence,
+  reason,
+}) => {
+  if (!interview || !level || !CANDIDATE_LEVELS.includes(level)) {
+    return;
+  }
+
+  const history = Array.isArray(interview.candidateLevelHistory)
+    ? interview.candidateLevelHistory
+    : [];
+
+  const last = history.length ? history[history.length - 1] : null;
+
+  const unchanged =
+    last &&
+    last.level === level &&
+    Number(last.score ?? -1) === Number(score ?? -1) &&
+    Number(last.confidence ?? -1) === Number(confidence ?? -1);
+
+  if (unchanged) {
+    interview.candidateLevelHistory = history;
+    return;
+  }
+
+  const validReasons = [
+    "initial-assessment",
+    "interview-progress",
+    "interview-completion",
+    "question-re-evaluation",
+    "full-re-evaluation",
+    "evidence-update",
+    "manual-recalculation",
+  ];
+
+  if (!validReasons.includes(reason)) {
+    return;
+  }
+
+  history.push({
+    level,
+    score: score === null || score === undefined ? null : score,
+    confidence:
+      confidence === null || confidence === undefined ? null : confidence,
+    reason,
+    evaluatedAt: new Date(),
+  });
+
+  interview.candidateLevelHistory = history;
+};
+
+// ============================================================
+// NEXT EVALUATION VERSION
+// Per interview + question
+// ============================================================
+
+const getNextEvaluationVersion = async ({ interviewId, questionId }) => {
+  const latest = await Evaluation.findOne({
+    interview: interviewId,
+    question: questionId,
+    status: "completed",
+  })
+    .sort({
+      version: -1,
+      createdAt: -1,
+    })
+    .lean();
+
+  return (Number(latest?.version) || 0) + 1;
+};
+
+// ============================================================
+// AI
+// ============================================================
+
+const runAIEvaluation = async ({
+  interview,
+  question,
+  answer,
+  evaluationType,
+  version,
+}) => {
+  const startedAt = Date.now();
+
+  const systemPrompt = buildEvaluationPrompt({
+    interview,
+    question,
+    answer,
+    evaluationType,
+    version,
+  });
+
+  const result = await generateAIResponse({
+    systemPrompt,
+
+    messages: [
+      {
+        role: "user",
+        content:
+          "Evaluate the candidate answer using the exact question, ideal answer, and candidate answer contained in the evaluation prompt.",
+      },
+    ],
+
+    responseFormat: "json",
+  });
+
+  if (!result || typeof result.content !== "string" || !result.content.trim()) {
+    throw new Error("AI provider returned an empty evaluation");
+  }
+
+  const rawEvaluation = parseAIJson(result.content);
+
+  if (!rawEvaluation) {
+    throw new Error("AI provider returned invalid evaluation JSON");
+  }
+
+  validateEvaluationData(rawEvaluation);
+
+  const evaluationData = normalizeEvaluation(rawEvaluation);
+
+  return {
+    result,
+    evaluationData,
+    processingTimeMs: Date.now() - startedAt,
+  };
+};
+
+// ============================================================
+// CREATE EVALUATION DOCUMENT
+// ============================================================
+
+const createEvaluation = async ({
+  interview,
+  question,
+  answer,
+  evaluationData,
+  result,
+  evaluationType,
+  version,
+  previousEvaluation = null,
+  answerVersion = 1,
+  processingTimeMs = null,
+}) => {
+  const provider = PROVIDERS.includes(result?.provider)
+    ? result.provider
+    : "manual";
+
+  const model = result?.model || null;
+
+  return Evaluation.create({
+    interview: interview._id,
+    question: question._id,
+    answer: answer._id,
+
+    evaluationType,
+    version,
+
+    previousEvaluation: previousEvaluation?._id || null,
+
+    technology: question?.skill || null,
+
+    category: question?.category || "technical",
+
+    difficulty: question?.difficulty || "medium",
+
+    correctnessScore: evaluationData.correctnessScore,
+
+    technicalScore: evaluationData.technicalScore,
+
+    communicationScore: evaluationData.communicationScore,
+
+    problemSolvingScore: evaluationData.problemSolvingScore,
+
+    overallScore: evaluationData.overallScore,
+
+    strengths: evaluationData.strengths,
+
+    weaknesses: evaluationData.weaknesses,
+
+    mistakes: evaluationData.mistakes,
+
+    corrections: evaluationData.corrections,
+
+    suggestions: evaluationData.suggestions,
+
+    studyTopics: evaluationData.studyTopics,
+
+    feedback: evaluationData.feedback,
+
+    evaluatedBy: provider,
+
+    status: "completed",
+
+    metadata: {
+      model,
+      promptVersion: PROMPT_VERSION,
+
+      processingTimeMs,
+
+      // Important for matching
+      // evaluation to the answer state.
+      answerVersion,
+    },
+  });
+};
+
+// ============================================================
+// RECALCULATE INTERVIEW SCORES
+// ============================================================
+
+const recalculateInterviewScores = async ({
+  userId,
+  interviewId,
+  reason,
+  changedQuestionId = null,
+}) => {
+  validateObjectId(userId, "user ID");
+
+  validateObjectId(interviewId, "interview ID");
+
+  const interview = await Interview.findOne({
+    _id: interviewId,
+    user: userId,
+  });
+
+  if (!interview) {
+    throw new Error("Interview not found");
+  }
+
+  const questions = await Question.find({
+    interview: interviewId,
+  })
+    .sort({
+      questionNumber: 1,
+    })
+    .lean();
+
+  const allEvaluations = await Evaluation.find({
+    interview: interviewId,
+    status: "completed",
+  })
+    .sort({
+      version: 1,
+      createdAt: 1,
+    })
+    .lean();
+
+  const latestEvaluations = getLatestEvaluations(allEvaluations);
+
+  const originalEvaluations = getOriginalEvaluations(allEvaluations);
+
+  const latestByQuestion = new Map();
+
+  for (const evaluation of latestEvaluations) {
+    const questionId = getRefId(evaluation?.question);
+
+    if (questionId) {
+      latestByQuestion.set(questionId, evaluation);
+    }
+  }
+
+  const originalByQuestion = new Map();
+
+  for (const evaluation of originalEvaluations) {
+    const questionId = getRefId(evaluation?.question);
+
+    if (questionId) {
+      originalByQuestion.set(questionId, evaluation);
+    }
+  }
+
+  // ========================================================
+  // ANSWERED QUESTIONS
+  // ========================================================
+
+  const answeredQuestions = questions.filter(
+    (question) => question?.status === "answered",
+  );
+
+  const answeredIds = new Set(
+    answeredQuestions.map((question) => String(question._id)),
+  );
+
+  // ========================================================
+  // CURRENT SCORE
+  // ========================================================
+
+  const currentScores = latestEvaluations
+    .filter((evaluation) => {
+      const questionId = getRefId(evaluation?.question);
+
+      return questionId && answeredIds.has(questionId);
+    })
+    .map((evaluation) => Number(evaluation.overallScore))
+    .filter(Number.isFinite);
+
+  const currentScore = average(currentScores);
+
+  // ========================================================
+  // ORIGINAL SCORE
+  // ========================================================
+
+  const originalScores = originalEvaluations
+    .filter((evaluation) => {
+      const questionId = getRefId(evaluation?.question);
+
+      return questionId && answeredIds.has(questionId);
+    })
+    .map((evaluation) => Number(evaluation.overallScore))
+    .filter(Number.isFinite);
+
+  const originalScore = average(originalScores);
+
+  // ========================================================
+  // TECHNOLOGY SCORES
+  // ========================================================
+
+  const technologyMap = new Map();
+
+  const ensureTechnology = (technology) => {
+    const cleanTechnology =
+      typeof technology === "string" ? technology.trim() : "";
+
+    if (!cleanTechnology) {
+      return null;
+    }
+
+    const normalizedKey = cleanTechnology.toLowerCase();
+
+    if (!technologyMap.has(normalizedKey)) {
+      technologyMap.set(normalizedKey, {
+        technology: cleanTechnology,
+
+        currentScores: [],
+        originalScores: [],
+
+        questionsAsked: 0,
+        questionsAnswered: 0,
+        questionsSkipped: 0,
+
+        strengths: [],
+        weaknesses: [],
+      });
+    }
+
+    return technologyMap.get(normalizedKey);
+  };
+
+  for (const question of questions) {
+    const technology = question?.skill;
+
+    const item = ensureTechnology(technology);
+
+    if (!item) {
+      continue;
+    }
+
+    item.questionsAsked += 1;
+
+    if (question.status === "answered") {
+      item.questionsAnswered += 1;
+    }
+
+    if (question.status === "skipped") {
+      item.questionsSkipped += 1;
+    }
+
+    const questionId = String(question._id);
+
+    const currentEvaluation = latestByQuestion.get(questionId);
+
+    if (
+      currentEvaluation &&
+      Number.isFinite(Number(currentEvaluation.overallScore)) &&
+      answeredIds.has(questionId)
+    ) {
+      item.currentScores.push(Number(currentEvaluation.overallScore));
+
+      if (Array.isArray(currentEvaluation.strengths)) {
+        item.strengths.push(...currentEvaluation.strengths);
+      }
+
+      if (Array.isArray(currentEvaluation.weaknesses)) {
+        item.weaknesses.push(...currentEvaluation.weaknesses);
+      }
+    }
+
+    const originalEvaluation = originalByQuestion.get(questionId);
+
+    if (
+      originalEvaluation &&
+      Number.isFinite(Number(originalEvaluation.overallScore)) &&
+      answeredIds.has(questionId)
+    ) {
+      item.originalScores.push(Number(originalEvaluation.overallScore));
+    }
+  }
+
+  // ========================================================
+  // PREVIOUS TECHNOLOGY STATE
+  // ========================================================
+
+  const previousTechnologyMap = new Map();
+
+  for (const previous of interview.technologyScores || []) {
+    if (previous?.technology) {
+      previousTechnologyMap.set(
+        previous.technology.trim().toLowerCase(),
+        previous,
+      );
+    }
+  }
+
+  // ========================================================
+  // BUILD TECHNOLOGY SCORES
+  // ========================================================
+
+  const finalTechnologyScores = Array.from(technologyMap.values()).map(
+    (item) => {
+      const normalizedKey = item.technology.trim().toLowerCase();
+
+      const previous = previousTechnologyMap.get(normalizedKey);
+
+      const currentTechnologyScore = average(item.currentScores);
+
+      const originalTechnologyScore = average(item.originalScores);
+
+      const previousCurrentScore = previous?.currentScore ?? null;
+
+      let scoreVersion = Number(previous?.scoreVersion) || 0;
+
+      const scoreChanged =
+        currentTechnologyScore !== null &&
+        Number(previousCurrentScore) !== Number(currentTechnologyScore);
+
+      const scoreHistory = Array.isArray(previous?.scoreHistory)
+        ? [...previous.scoreHistory]
+        : [];
+
+      if (scoreChanged) {
+        scoreVersion += 1;
+
+        let historyReason = "initial-evaluation";
+
+        if (reason === "question-re-evaluation") {
+          historyReason = "question-re-evaluation";
+        } else if (reason === "full-re-evaluation") {
+          historyReason = "full-re-evaluation";
+        } else if (reason === "manual-recalculation") {
+          historyReason = "manual-recalculation";
+        } else if (reason === "final-calculation") {
+          historyReason = "final-calculation";
+        }
+
+        scoreHistory.push({
+          version: scoreVersion || 1,
+
+          score: currentTechnologyScore,
+
+          reason: historyReason,
+
+          evaluatedAt: new Date(),
+        });
+      }
+
+      return {
+        technology: item.technology,
+
+        originalScore:
+          originalTechnologyScore ?? previous?.originalScore ?? null,
+
+        currentScore: currentTechnologyScore,
+
+        scoreVersion,
+
+        questionsAsked: Math.min(item.questionsAsked, MAX_QUESTIONS),
+
+        questionsAnswered: Math.min(item.questionsAnswered, MAX_QUESTIONS),
+
+        questionsSkipped: Math.min(item.questionsSkipped, MAX_QUESTIONS),
+
+        strengths: [
+          ...new Set(normalizeStringArray(item.strengths, MAX_ARRAY_ITEMS)),
+        ],
+
+        weaknesses: [
+          ...new Set(normalizeStringArray(item.weaknesses, MAX_ARRAY_ITEMS)),
+        ],
+
+        scoreHistory,
+      };
+    },
+  );
+
+  // ========================================================
+  // CANDIDATE LEVEL
+  // ========================================================
+
+  const candidateEvaluations = latestEvaluations.filter((evaluation) => {
+    const questionId = getRefId(evaluation?.question);
+
+    return questionId && answeredIds.has(questionId);
+  });
+
+  const levelData = calculateCandidateLevel({
+    currentEvaluations: candidateEvaluations,
+    questions,
+  });
+
+  // ========================================================
+  // SCORE HISTORY
+  // ========================================================
+
+  let scoreVersion = Number(interview.scoreVersion) || 0;
+
+  const scoreHistory = Array.isArray(interview.scoreHistory)
+    ? [...interview.scoreHistory]
+    : [];
+
+  const previousCurrentScore = interview.currentScore ?? null;
+
+  const overallScoreChanged =
+    currentScore !== null &&
+    (previousCurrentScore === null ||
+      Number(previousCurrentScore) !== Number(currentScore));
+
+  if (overallScoreChanged) {
+    scoreVersion += 1;
+
+    appendScoreHistory({
+      history: scoreHistory,
+      version: scoreVersion,
+      score: currentScore,
+      reason,
+      changedQuestionId,
     });
+  }
 
-    if (!result || !result.content) {
-      throw new Error("AI provider returned an empty evaluation");
+  // ========================================================
+  // COUNTERS
+  // ========================================================
+
+  const answeredCount = answeredQuestions.length;
+
+  const skippedCount = questions.filter(
+    (question) => question?.status === "skipped",
+  ).length;
+
+  const generatedCount = questions.length;
+
+  const targetQuestions = Math.min(
+    Number(interview.totalQuestions) || MAX_QUESTIONS,
+    MAX_QUESTIONS,
+  );
+
+  const completedCount = Math.min(
+    answeredCount + skippedCount,
+    targetQuestions,
+  );
+
+  // ========================================================
+  // SAVE
+  // ========================================================
+
+  interview.currentScore = currentScore;
+
+  interview.overallScore = currentScore;
+
+  if (interview.originalScore === null && originalScore !== null) {
+    interview.originalScore = originalScore;
+  }
+
+  interview.scoreVersion = scoreVersion;
+
+  interview.scoreHistory = scoreHistory;
+
+  interview.technologyScores = finalTechnologyScores;
+
+  interview.answeredQuestions = Math.min(answeredCount, targetQuestions);
+
+  interview.skippedQuestions = Math.min(skippedCount, targetQuestions);
+
+  interview.generatedQuestions = Math.min(generatedCount, MAX_QUESTIONS);
+
+  interview.completedQuestions = completedCount;
+
+  // Do not move navigation during
+  // score recalculation.
+  if (!interview.currentQuestionNumber) {
+    interview.currentQuestionNumber = Math.min(
+      completedCount + 1,
+      targetQuestions,
+    );
+  }
+
+  if (levelData.level) {
+    interview.estimatedCandidateLevel = levelData.level;
+
+    interview.candidateLevelScore = levelData.score;
+
+    interview.candidateLevelConfidence = levelData.confidence;
+
+    let levelHistoryReason = "interview-progress";
+
+    if (reason === "question-re-evaluation") {
+      levelHistoryReason = "question-re-evaluation";
+    } else if (reason === "full-re-evaluation") {
+      levelHistoryReason = "full-re-evaluation";
+    } else if (reason === "manual-recalculation") {
+      levelHistoryReason = "manual-recalculation";
+    } else if (reason === "final-calculation") {
+      levelHistoryReason = "interview-completion";
     }
 
-    let evaluationData;
+    appendCandidateLevelHistory({
+      interview,
+      level: levelData.level,
+      score: levelData.score,
+      confidence: levelData.confidence,
+      reason: levelHistoryReason,
+    });
+  }
 
-    try {
-      evaluationData =
-        typeof result.content === "string"
-          ? JSON.parse(result.content)
-          : result.content;
-    } catch (error) {
-      console.error("[Evaluation Service] Invalid AI JSON:", result.content);
+  interview.lastActivityAt = new Date();
 
-      throw new Error("AI provider returned invalid evaluation JSON");
+  await interview.save();
+
+  debug("Interview scores recalculated", {
+    interviewId: String(interviewId),
+
+    originalScore: interview.originalScore,
+
+    currentScore: interview.currentScore,
+
+    scoreVersion: interview.scoreVersion,
+
+    answeredQuestions: interview.answeredQuestions,
+
+    skippedQuestions: interview.skippedQuestions,
+
+    technologyCount: finalTechnologyScores.length,
+
+    candidateLevel: interview.estimatedCandidateLevel,
+
+    candidateLevelConfidence: interview.candidateLevelConfidence,
+  });
+
+  return {
+    originalScore: interview.originalScore,
+
+    currentScore: interview.currentScore,
+
+    overallScore: interview.currentScore,
+
+    scoreVersion: interview.scoreVersion,
+
+    scoreHistory: interview.scoreHistory,
+
+    technologyScores: interview.technologyScores,
+
+    candidateLevel: interview.estimatedCandidateLevel,
+
+    candidateLevelScore: interview.candidateLevelScore,
+
+    candidateLevelConfidence: interview.candidateLevelConfidence,
+
+    candidateLevelHistory: interview.candidateLevelHistory,
+
+    answeredQuestions: interview.answeredQuestions,
+
+    skippedQuestions: interview.skippedQuestions,
+
+    completedQuestions: interview.completedQuestions,
+
+    generatedQuestions: interview.generatedQuestions,
+
+    targetQuestions: interview.totalQuestions,
+
+    scoreChanged: overallScoreChanged,
+  };
+};
+
+// ============================================================
+// UPDATE ANSWER EVALUATION STATE
+// ============================================================
+
+const markAnswerEvaluationCompleted = async ({ answerId, evaluation }) => {
+  await Answer.findByIdAndUpdate(answerId, {
+    $set: {
+      evaluationStatus: "completed",
+
+      evaluationVersion: Number(evaluation?.version) || 1,
+
+      evaluatedAt: new Date(),
+
+      evaluationError: {
+        code: null,
+        message: null,
+        provider: evaluation?.evaluatedBy || null,
+        occurredAt: null,
+      },
+    },
+  });
+};
+
+const markAnswerEvaluationFailed = async ({ answerId, error }) => {
+  await Answer.findByIdAndUpdate(answerId, {
+    $set: {
+      evaluationStatus: "failed",
+
+      evaluationError: {
+        code: error?.code || "EVALUATION_FAILED",
+
+        message: error?.message || "Evaluation failed",
+
+        provider: null,
+
+        occurredAt: new Date(),
+      },
+    },
+  });
+};
+
+// ============================================================
+// EVALUATE ANSWER
+// ORIGINAL EVALUATION
+// ============================================================
+
+const evaluateAnswer = async (userId, interviewId, questionId) => {
+  validateObjectId(userId, "user ID");
+
+  validateObjectId(interviewId, "interview ID");
+
+  validateObjectId(questionId, "question ID");
+
+  const interview = await Interview.findOne({
+    _id: interviewId,
+    user: userId,
+  }).lean();
+
+  if (!interview) {
+    throw new Error("Interview not found");
+  }
+
+  if (interview.status !== "in-progress" && interview.status !== "completed") {
+    throw new Error("Interview cannot be evaluated in its current state");
+  }
+
+  const question = await getInterviewQuestion(interviewId, questionId);
+
+  // ----------------------------------------------------------
+  // LATEST ANSWER DOCUMENT
+  // ----------------------------------------------------------
+
+  const answer = await Answer.findOne({
+    interview: interviewId,
+    question: questionId,
+    user: userId,
+  }).sort({
+    submissionVersion: -1,
+    createdAt: -1,
+  });
+
+  if (!answer) {
+    throw new Error("Answer not found");
+  }
+
+  const answerText = getCandidateAnswerText(answer, question);
+
+  if (!answerText) {
+    throw new Error("Cannot evaluate an empty answer");
+  }
+
+  // ----------------------------------------------------------
+  // ORIGINAL EVALUATION ALREADY EXISTS
+  // ----------------------------------------------------------
+
+  const originalEvaluation = await Evaluation.findOne({
+    interview: interviewId,
+    question: questionId,
+    evaluationType: "original",
+    status: "completed",
+  })
+    .sort({
+      version: 1,
+      createdAt: 1,
+    })
+    .lean();
+
+  if (originalEvaluation) {
+    return {
+      evaluation: originalEvaluation,
+
+      provider: originalEvaluation.evaluatedBy,
+
+      model: originalEvaluation?.metadata?.model || null,
+
+      alreadyEvaluated: true,
+      reEvaluation: false,
+
+      version: Number(originalEvaluation.version) || 1,
+
+      answerVersion:
+        Number(originalEvaluation?.metadata?.answerVersion) ||
+        Number(answer.submissionVersion) ||
+        1,
+
+      interviewProgress: null,
+      scoreData: null,
+    };
+  }
+
+  // ----------------------------------------------------------
+  // PROCESSING LOCK
+  // ----------------------------------------------------------
+
+  const lock = await Answer.findOneAndUpdate(
+    {
+      _id: answer._id,
+
+      evaluationStatus: {
+        $in: ["pending", "failed"],
+      },
+    },
+    {
+      $set: {
+        evaluationStatus: "processing",
+
+        evaluationError: {
+          code: null,
+          message: null,
+          provider: null,
+          occurredAt: null,
+        },
+      },
+    },
+    {
+      new: true,
+    },
+  );
+
+  if (!lock) {
+    const currentAnswer = await Answer.findById(answer._id).lean();
+
+    if (currentAnswer?.evaluationStatus === "processing") {
+      throw new Error("Answer evaluation is already in progress");
     }
 
-    // --------------------------------------------------------
-    // VALIDATE SCORES
-    // --------------------------------------------------------
+    if (currentAnswer?.evaluationStatus === "completed") {
+      const completedEvaluation = await Evaluation.findOne({
+        interview: interviewId,
+        question: questionId,
+        answer: answer._id,
+        status: "completed",
+      })
+        .sort({
+          version: -1,
+          createdAt: -1,
+        })
+        .lean();
 
-    const scoreFields = [
-      "correctnessScore",
-      "technicalScore",
-      "communicationScore",
-      "problemSolvingScore",
-      "overallScore",
-    ];
+      if (completedEvaluation) {
+        return {
+          evaluation: completedEvaluation,
 
-    for (const field of scoreFields) {
-      evaluationData[field] = validateScore(evaluationData[field], field);
+          provider: completedEvaluation.evaluatedBy,
+
+          model: completedEvaluation?.metadata?.model || null,
+
+          alreadyEvaluated: true,
+          reEvaluation: false,
+
+          version: Number(completedEvaluation.version) || 1,
+
+          answerVersion:
+            Number(completedEvaluation?.metadata?.answerVersion) ||
+            Number(answer.submissionVersion) ||
+            1,
+
+          interviewProgress: null,
+          scoreData: null,
+        };
+      }
     }
 
-    // --------------------------------------------------------
-    // NORMALIZE ARRAYS
-    // --------------------------------------------------------
+    throw new Error("Unable to start answer evaluation");
+  }
 
-    const strengths = normalizeStringArray(evaluationData.strengths);
-
-    const weaknesses = normalizeStringArray(evaluationData.weaknesses);
-
-    const mistakes = normalizeStringArray(evaluationData.mistakes);
-
-    const corrections = normalizeStringArray(evaluationData.corrections);
-
-    const suggestions = normalizeStringArray(evaluationData.suggestions);
-
-    // --------------------------------------------------------
-    // STUDY TOPICS
-    // --------------------------------------------------------
-
-    const studyTopics = Array.isArray(evaluationData.studyTopics)
-      ? evaluationData.studyTopics
-          .filter(
-            (item) =>
-              item &&
-              typeof item.topic === "string" &&
-              item.topic.trim().length > 0 &&
-              ["low", "medium", "high"].includes(item.priority),
-          )
-          .map((item) => ({
-            topic: item.topic.trim().slice(0, 150),
-
-            priority: item.priority,
-          }))
-          .slice(0, 10)
-      : [];
-
-    // --------------------------------------------------------
-    // FEEDBACK
-    // --------------------------------------------------------
-
-    const feedback =
-      typeof evaluationData.feedback === "string"
-        ? evaluationData.feedback.trim().slice(0, 5000)
-        : "";
-
-    // --------------------------------------------------------
-    // CREATE EVALUATION
-    // --------------------------------------------------------
+  try {
+    const aiResult = await runAIEvaluation({
+      interview,
+      question,
+      answer: lock,
+      evaluationType: "original",
+      version: 1,
+    });
 
     let evaluation;
 
     try {
-      evaluation = await Evaluation.create({
-        interview: interviewId,
-        question: questionId,
-        answer: answer._id,
+      evaluation = await createEvaluation({
+        interview,
+        question,
+        answer: lock,
 
-        correctnessScore: evaluationData.correctnessScore,
+        evaluationData: aiResult.evaluationData,
 
-        technicalScore: evaluationData.technicalScore,
+        result: aiResult.result,
 
-        communicationScore: evaluationData.communicationScore,
+        evaluationType: "original",
 
-        problemSolvingScore: evaluationData.problemSolvingScore,
+        version: 1,
 
-        overallScore: evaluationData.overallScore,
+        previousEvaluation: null,
 
-        strengths,
-        weaknesses,
-        mistakes,
-        corrections,
-        suggestions,
-        studyTopics,
-        feedback,
+        answerVersion: Number(lock.submissionVersion) || 1,
 
-        evaluatedBy: result.provider || "manual",
+        processingTimeMs: aiResult.processingTimeMs,
       });
     } catch (error) {
-      if (error.code === 11000) {
-        const duplicateEvaluation = await Evaluation.findOne({
+      if (error?.code === 11000) {
+        const duplicate = await Evaluation.findOne({
           interview: interviewId,
           question: questionId,
-          answer: answer._id,
-        });
+          evaluationType: "original",
+          status: "completed",
+        })
+          .sort({
+            version: 1,
+            createdAt: 1,
+          })
+          .lean();
 
-        if (duplicateEvaluation) {
-          answer.evaluationStatus = "completed";
+        if (duplicate) {
+          await Answer.findByIdAndUpdate(lock._id, {
+            $set: {
+              evaluationStatus: "completed",
 
-          await answer.save();
+              evaluationVersion: Number(duplicate.version) || 1,
+
+              evaluatedAt: new Date(),
+            },
+          });
 
           return {
-            evaluation: duplicateEvaluation,
-            provider: duplicateEvaluation.evaluatedBy,
-            model: null,
+            evaluation: duplicate,
+
+            provider: duplicate.evaluatedBy,
+
+            model: duplicate?.metadata?.model || null,
+
             alreadyEvaluated: true,
+            reEvaluation: false,
+
+            version: Number(duplicate.version) || 1,
+
+            answerVersion:
+              Number(duplicate?.metadata?.answerVersion) ||
+              Number(lock.submissionVersion) ||
+              1,
+
             interviewProgress: null,
+            scoreData: null,
           };
         }
       }
@@ -413,18 +1791,14 @@ Return ONLY valid JSON.
       throw error;
     }
 
-    // --------------------------------------------------------
-    // MARK ANSWER COMPLETE
-    // --------------------------------------------------------
+    await markAnswerEvaluationCompleted({
+      answerId: lock._id,
+      evaluation,
+    });
 
-    answer.evaluationStatus = "completed";
-
-    await answer.save();
-
-    // --------------------------------------------------------
-    // MARK QUESTION ANSWERED
-    // --------------------------------------------------------
-
+    // Question should already be marked
+    // answered by answer.service.
+    // Keep it synchronized.
     await Question.findOneAndUpdate(
       {
         _id: questionId,
@@ -433,139 +1807,660 @@ Return ONLY valid JSON.
       {
         $set: {
           status: "answered",
+          skippedAt: null,
         },
       },
     );
 
-    // --------------------------------------------------------
-    // COUNT EVALUATIONS
-    // --------------------------------------------------------
-
-    const completedQuestions = await Evaluation.countDocuments({
-      interview: interviewId,
+    const scoreData = await recalculateInterviewScores({
+      userId,
+      interviewId,
+      reason: "initial-evaluation",
+      changedQuestionId: null,
     });
 
-    // --------------------------------------------------------
-    // UPDATE INTERVIEW PROGRESS
-    // --------------------------------------------------------
-
-    await Interview.findOneAndUpdate(
-      {
-        _id: interviewId,
-        user: userId,
-      },
-      {
-        $set: {
-          completedQuestions: Math.min(completedQuestions, MAX_QUESTIONS),
-
-          totalQuestions: Math.min(
-            await Question.countDocuments({
-              interview: interviewId,
-            }),
-            MAX_QUESTIONS,
-          ),
-        },
-      },
-    );
-
-    // --------------------------------------------------------
-    // CHECK MAXIMUM
-    // --------------------------------------------------------
-
-    const reachedMaximum = completedQuestions >= MAX_QUESTIONS;
-
-    // --------------------------------------------------------
-    // AUTO COMPLETE AT Q100
-    // --------------------------------------------------------
-
-    if (reachedMaximum) {
-      const allEvaluations = await Evaluation.find({
-        interview: interviewId,
-      }).lean();
-
-      const totalScore = allEvaluations.reduce(
-        (sum, item) => sum + Number(item.overallScore || 0),
-        0,
-      );
-
-      const overallScore = allEvaluations.length
-        ? Math.round(totalScore / allEvaluations.length)
-        : 0;
-
-      await Interview.findOneAndUpdate(
-        {
-          _id: interviewId,
-          user: userId,
-          status: "in-progress",
-        },
-        {
-          $set: {
-            status: "completed",
-
-            completedAt: new Date(),
-
-            completedQuestions: Math.min(allEvaluations.length, MAX_QUESTIONS),
-
-            totalQuestions: Math.min(allEvaluations.length, MAX_QUESTIONS),
-
-            overallScore,
-
-            exitReason: "maximum-reached",
-          },
-        },
-      );
-    }
-
-    // --------------------------------------------------------
-    // PROGRESS
-    // --------------------------------------------------------
-
-    const totalQuestions = await Question.countDocuments({
-      interview: interviewId,
-    });
-
-    const interviewProgress = {
-      completedQuestions,
-
-      totalQuestions: Math.min(totalQuestions, MAX_QUESTIONS),
-
-      remainingQuestions: Math.max(MAX_QUESTIONS - completedQuestions, 0),
-
-      isLastQuestion: completedQuestions >= MAX_QUESTIONS,
-
-      percentage: Math.min(
-        100,
-        Math.round((completedQuestions / MAX_QUESTIONS) * 100),
-      ),
-
-      interviewCompleted: reachedMaximum,
-    };
+    const finalEvaluation = await Evaluation.findById(evaluation._id).lean();
 
     return {
-      evaluation,
+      evaluation: finalEvaluation,
 
-      provider: result.provider || "unknown",
+      provider: aiResult.result.provider,
 
-      model: result.model || null,
+      model: aiResult.result.model || null,
 
       alreadyEvaluated: false,
+      reEvaluation: false,
 
-      interviewProgress,
+      version: 1,
+
+      answerVersion: Number(lock.submissionVersion) || 1,
+
+      interviewProgress: {
+        completedQuestions: scoreData.completedQuestions,
+
+        answeredQuestions: scoreData.answeredQuestions,
+
+        skippedQuestions: scoreData.skippedQuestions,
+
+        generatedQuestions: scoreData.generatedQuestions,
+
+        targetQuestions: scoreData.targetQuestions,
+
+        remainingQuestions: Math.max(
+          scoreData.targetQuestions - scoreData.completedQuestions,
+          0,
+        ),
+
+        percentage: scoreData.targetQuestions
+          ? Math.round(
+              (scoreData.completedQuestions / scoreData.targetQuestions) * 100,
+            )
+          : 0,
+
+        interviewCompleted:
+          scoreData.completedQuestions >= scoreData.targetQuestions,
+      },
+
+      scoreData,
     };
   } catch (error) {
-    try {
-      answer.evaluationStatus = "failed";
+    debugError("Original evaluation failed", error);
 
-      await answer.save();
-    } catch (saveError) {
-      console.error(
-        "[Evaluation Service] Failed to update answer status:",
-        saveError,
-      );
-    }
+    await markAnswerEvaluationFailed({
+      answerId: lock._id,
+      error,
+    });
 
     throw error;
   }
+};
+
+// ============================================================
+// APPLY NEW ANSWER VERSION
+//
+// IMPORTANT:
+// Still uses ONE Answer document.
+//
+// If answer content changed:
+//   answerVersions gets new version.
+//
+// If answer content did not change:
+//   no duplicate answer version is created.
+// ============================================================
+
+const applyAnswerVersion = async ({
+  answer,
+  answerType,
+  answerText,
+  code,
+  language,
+}) => {
+  const normalizedText = cleanText(answerText);
+
+  const normalizedCode = cleanText(code);
+
+  const normalizedLanguage = cleanText(language, 100);
+
+  const currentVersion = Number(answer.submissionVersion) || 1;
+
+  const currentText = cleanText(answer.answerText);
+
+  const currentCode = cleanText(answer.code);
+
+  const currentLanguage = cleanText(answer.language, 100);
+
+  const sameAnswer =
+    (currentText || "") === (normalizedText || "") &&
+    (currentCode || "") === (normalizedCode || "") &&
+    (currentLanguage || "") === (normalizedLanguage || "") &&
+    (answer.answerType || "") === (answerType || "");
+
+  // No content change.
+  if (sameAnswer) {
+    return {
+      answer,
+      answerVersion: currentVersion,
+      changed: false,
+    };
+  }
+
+  const nextVersion = currentVersion + 1;
+
+  if (nextVersion > 100) {
+    throw new Error("Maximum of 100 answer versions allowed for one question");
+  }
+
+  const now = new Date();
+
+  if (!Array.isArray(answer.answerVersions)) {
+    answer.answerVersions = [];
+  }
+
+  answer.answerVersions.push({
+    version: nextVersion,
+
+    text: normalizedText || null,
+
+    code: normalizedCode || null,
+
+    language: normalizedLanguage || null,
+
+    submissionType: "resubmission",
+
+    submittedAt: now,
+  });
+
+  answer.answerType = answerType;
+
+  answer.answerText = normalizedText || null;
+
+  answer.code = normalizedCode || null;
+
+  answer.language = normalizedLanguage || null;
+
+  answer.currentAnswer = {
+    text: normalizedText || null,
+
+    code: normalizedCode || null,
+
+    language: normalizedLanguage || null,
+
+    version: nextVersion,
+
+    submittedAt: now,
+  };
+
+  answer.submissionVersion = nextVersion;
+
+  answer.lastSubmissionAt = now;
+
+  await answer.save();
+
+  return {
+    answer,
+    answerVersion: nextVersion,
+    changed: true,
+  };
+};
+
+// ============================================================
+// RE-EVALUATE ANSWER
+//
+// One Answer document.
+// New answer version ONLY when answer changed.
+// New Evaluation document EVERY time.
+// ============================================================
+
+const reEvaluateAnswer = async (
+  userId,
+  interviewId,
+  questionId,
+  answerInput = {},
+) => {
+  validateObjectId(userId, "user ID");
+
+  validateObjectId(interviewId, "interview ID");
+
+  validateObjectId(questionId, "question ID");
+
+  const interview = await Interview.findOne({
+    _id: interviewId,
+    user: userId,
+  }).lean();
+
+  if (!interview) {
+    throw new Error("Interview not found");
+  }
+
+  if (interview.status !== "in-progress" && interview.status !== "completed") {
+    throw new Error("Interview cannot be re-evaluated in its current state");
+  }
+
+  const question = await getInterviewQuestion(interviewId, questionId);
+
+  if (question.status !== "answered") {
+    throw new Error("Only answered questions can be re-evaluated");
+  }
+
+  // ----------------------------------------------------------
+  // SAME ANSWER DOCUMENT
+  // ----------------------------------------------------------
+
+  const answer = await Answer.findOne({
+    interview: interviewId,
+    question: questionId,
+    user: userId,
+  }).sort({
+    submissionVersion: -1,
+    createdAt: -1,
+  });
+
+  if (!answer) {
+    throw new Error("Answer not found");
+  }
+
+  // ----------------------------------------------------------
+  // ORIGINAL EVALUATION
+  // ----------------------------------------------------------
+
+  const originalEvaluation = await Evaluation.findOne({
+    interview: interviewId,
+    question: questionId,
+    evaluationType: "original",
+    status: "completed",
+  })
+    .sort({
+      version: 1,
+      createdAt: 1,
+    })
+    .lean();
+
+  if (!originalEvaluation) {
+    throw new Error("Original evaluation must exist before re-evaluation");
+  }
+
+  // ----------------------------------------------------------
+  // DETERMINE EFFECTIVE ANSWER
+  // ----------------------------------------------------------
+
+  const questionType = question.category;
+
+  const isCodeQuestion =
+    questionType === "coding" ||
+    questionType === "dsa" ||
+    questionType === "debugging";
+
+  const requestedAnswerText =
+    typeof answerInput?.answerText === "string"
+      ? cleanText(answerInput.answerText)
+      : null;
+
+  const requestedAnswerType =
+    typeof answerInput?.answerType === "string"
+      ? answerInput.answerType.trim()
+      : null;
+
+  const requestedCode =
+    typeof answerInput?.code === "string" ? cleanText(answerInput.code) : null;
+
+  const requestedLanguage =
+    typeof answerInput?.language === "string"
+      ? cleanText(answerInput.language, 100)
+      : null;
+
+  let effectiveAnswerType =
+    requestedAnswerType ||
+    answer.answerType ||
+    (isCodeQuestion ? questionType : "text");
+
+  let effectiveAnswerText =
+    requestedAnswerText !== null
+      ? requestedAnswerText
+      : cleanText(answer.answerText);
+
+  let effectiveCode =
+    requestedCode !== null ? requestedCode : cleanText(answer.code);
+
+  let effectiveLanguage =
+    requestedLanguage !== null
+      ? requestedLanguage
+      : cleanText(answer.language, 100);
+
+  // Coding/debugging must be evaluated
+  // from code.
+  if (isCodeQuestion) {
+    effectiveAnswerText = "";
+  } else {
+    effectiveCode = "";
+    effectiveLanguage = "";
+    effectiveAnswerType = "text";
+  }
+
+  const effectiveCandidateAnswer = isCodeQuestion
+    ? effectiveCode
+    : effectiveAnswerText;
+
+  if (!effectiveCandidateAnswer) {
+    throw new Error("Cannot re-evaluate an empty answer");
+  }
+
+  // ----------------------------------------------------------
+  // APPLY ANSWER VERSION ONLY IF CHANGED
+  // ----------------------------------------------------------
+
+  const versionResult = await applyAnswerVersion({
+    answer,
+    answerType: effectiveAnswerType,
+
+    answerText: effectiveAnswerText,
+
+    code: effectiveCode,
+
+    language: effectiveLanguage,
+  });
+
+  const currentAnswer = versionResult.answer;
+
+  const answerVersion = versionResult.answerVersion;
+
+  // ----------------------------------------------------------
+  // NEXT EVALUATION VERSION
+  // ----------------------------------------------------------
+
+  const nextEvaluationVersion = await getNextEvaluationVersion({
+    interviewId,
+    questionId,
+  });
+
+  // ----------------------------------------------------------
+  // AI
+  // ----------------------------------------------------------
+
+  try {
+    await Answer.findByIdAndUpdate(currentAnswer._id, {
+      $set: {
+        evaluationStatus: "processing",
+
+        evaluationError: {
+          code: null,
+          message: null,
+          provider: null,
+          occurredAt: null,
+        },
+      },
+    });
+
+    const aiResult = await runAIEvaluation({
+      interview,
+      question,
+      answer: currentAnswer,
+      evaluationType: "re-evaluation",
+      version: nextEvaluationVersion,
+    });
+
+    const latestEvaluation = await Evaluation.findOne({
+      interview: interviewId,
+      question: questionId,
+      status: "completed",
+    })
+      .sort({
+        version: -1,
+        createdAt: -1,
+      })
+      .lean();
+
+    const evaluation = await createEvaluation({
+      interview,
+      question,
+      answer: currentAnswer,
+
+      evaluationData: aiResult.evaluationData,
+
+      result: aiResult.result,
+
+      evaluationType: "re-evaluation",
+
+      version: nextEvaluationVersion,
+
+      previousEvaluation: latestEvaluation,
+
+      answerVersion,
+
+      processingTimeMs: aiResult.processingTimeMs,
+    });
+
+    await markAnswerEvaluationCompleted({
+      answerId: currentAnswer._id,
+
+      evaluation,
+    });
+
+    // Keep question answered.
+    await Question.findOneAndUpdate(
+      {
+        _id: questionId,
+        interview: interviewId,
+      },
+      {
+        $set: {
+          status: "answered",
+          skippedAt: null,
+        },
+      },
+    );
+
+    // --------------------------------------------------------
+    // RECALCULATE
+    // --------------------------------------------------------
+
+    const scoreData = await recalculateInterviewScores({
+      userId,
+      interviewId,
+      reason: "question-re-evaluation",
+      changedQuestionId: questionId,
+    });
+
+    const finalEvaluation = await Evaluation.findById(evaluation._id).lean();
+
+    // --------------------------------------------------------
+    // ORIGINAL VS CURRENT
+    // --------------------------------------------------------
+
+    const originalScore = Number(originalEvaluation.overallScore);
+
+    const reEvaluatedScore = Number(finalEvaluation?.overallScore);
+
+    const difference =
+      Number.isFinite(originalScore) && Number.isFinite(reEvaluatedScore)
+        ? Math.round((reEvaluatedScore - originalScore) * 100) / 100
+        : null;
+
+    debug("Answer re-evaluation completed", {
+      questionId: String(questionId),
+
+      answerVersion,
+
+      evaluationVersion: nextEvaluationVersion,
+
+      answerChanged: versionResult.changed,
+
+      originalScore,
+
+      reEvaluatedScore,
+
+      difference,
+    });
+
+    return {
+      evaluation: finalEvaluation,
+
+      answer: {
+        _id: currentAnswer._id,
+
+        version: answerVersion,
+
+        answerType: currentAnswer.answerType,
+
+        answerText: currentAnswer.answerText,
+
+        code: currentAnswer.code,
+
+        language: currentAnswer.language,
+      },
+
+      previousAnswer: {
+        _id: versionResult.changed ? null : currentAnswer._id,
+
+        version: Math.max(1, answerVersion - 1),
+      },
+
+      originalEvaluation,
+
+      comparison: {
+        originalScore,
+        reEvaluatedScore,
+        difference,
+      },
+
+      provider: aiResult.result.provider,
+
+      model: aiResult.result.model || null,
+
+      alreadyEvaluated: false,
+      reEvaluation: true,
+
+      version: nextEvaluationVersion,
+
+      answerVersion,
+
+      scoreData,
+    };
+  } catch (error) {
+    debugError("Answer re-evaluation failed", error);
+
+    await markAnswerEvaluationFailed({
+      answerId: currentAnswer._id,
+
+      error,
+    });
+
+    throw error;
+  }
+};
+
+// ============================================================
+// FULL INTERVIEW RE-EVALUATION
+// ============================================================
+
+const reEvaluateInterview = async (userId, interviewId) => {
+  validateObjectId(userId, "user ID");
+
+  validateObjectId(interviewId, "interview ID");
+
+  const interview = await Interview.findOne({
+    _id: interviewId,
+    user: userId,
+  }).lean();
+
+  if (!interview) {
+    throw new Error("Interview not found");
+  }
+
+  const questions = await Question.find({
+    interview: interviewId,
+    status: "answered",
+  })
+    .sort({
+      questionNumber: 1,
+    })
+    .lean();
+
+  if (!questions.length) {
+    throw new Error("No answered questions are available for re-evaluation");
+  }
+
+  const results = [];
+  const failures = [];
+
+  for (const question of questions) {
+    try {
+      const latestAnswer = await Answer.findOne({
+        interview: interviewId,
+        question: question._id,
+        user: userId,
+      })
+        .sort({
+          submissionVersion: -1,
+          createdAt: -1,
+        })
+        .lean();
+
+      if (!latestAnswer) {
+        throw new Error("Answer not found");
+      }
+
+      let payload;
+
+      const isCodeQuestion =
+        question.category === "coding" ||
+        question.category === "dsa" ||
+        question.category === "debugging";
+
+      if (isCodeQuestion) {
+        payload = {
+          answerType: latestAnswer.answerType,
+          code: latestAnswer.code || "",
+          language: latestAnswer.language || "",
+        };
+      } else {
+        payload = {
+          answerType: "text",
+          answerText: latestAnswer.answerText || "",
+        };
+      }
+
+      const result = await reEvaluateAnswer(
+        userId,
+        interviewId,
+        question._id,
+        payload,
+      );
+
+      results.push({
+        questionId: String(question._id),
+
+        questionNumber: question.questionNumber,
+
+        success: true,
+
+        answerVersion: result.answerVersion || null,
+
+        evaluationVersion: result.version || null,
+
+        score: result.evaluation?.overallScore ?? null,
+
+        originalScore: result.comparison?.originalScore ?? null,
+
+        reEvaluatedScore: result.comparison?.reEvaluatedScore ?? null,
+
+        difference: result.comparison?.difference ?? null,
+      });
+    } catch (error) {
+      failures.push({
+        questionId: String(question._id),
+
+        questionNumber: question.questionNumber,
+
+        success: false,
+
+        message: error?.message || "Re-evaluation failed",
+      });
+
+      debugError(`Failed to re-evaluate Q${question.questionNumber}`, error);
+    }
+  }
+
+  const scoreData = await recalculateInterviewScores({
+    userId,
+    interviewId,
+    reason: "full-re-evaluation",
+    changedQuestionId: null,
+  });
+
+  return {
+    success: failures.length === 0,
+
+    interviewId,
+
+    evaluatedQuestions: results.length,
+
+    failedQuestions: failures.length,
+
+    results,
+    failures,
+
+    scoreData,
+  };
 };
 
 // ============================================================
@@ -573,28 +2468,79 @@ Return ONLY valid JSON.
 // ============================================================
 
 const getEvaluation = async (userId, interviewId, questionId) => {
-  const interview = await Interview.findOne({
-    _id: interviewId,
-    user: userId,
-  }).lean();
+  validateObjectId(userId, "user ID");
 
-  if (!interview) {
-    throw new Error("Interview not found");
-  }
+  validateObjectId(interviewId, "interview ID");
 
-  const evaluation = await Evaluation.findOne({
+  validateObjectId(questionId, "question ID");
+
+  await getOwnedInterview(userId, interviewId);
+
+  const current = await Evaluation.findOne({
     interview: interviewId,
     question: questionId,
+    status: "completed",
   })
+    .sort({
+      version: -1,
+      createdAt: -1,
+    })
     .populate("question")
     .populate("answer")
     .lean();
 
-  if (!evaluation) {
+  if (!current) {
     throw new Error("Evaluation not found");
   }
 
-  return evaluation;
+  const history = await Evaluation.find({
+    interview: interviewId,
+    question: questionId,
+    status: "completed",
+  })
+    .sort({
+      version: 1,
+      createdAt: 1,
+    })
+    .populate("answer")
+    .lean();
+
+  const original =
+    history.find((item) => item.evaluationType === "original") || null;
+
+  let comparison = null;
+
+  if (original) {
+    const originalScore = Number(original.overallScore);
+
+    const currentScore = Number(current.overallScore);
+
+    if (Number.isFinite(originalScore) && Number.isFinite(currentScore)) {
+      comparison = {
+        originalScore,
+        currentScore,
+
+        difference: Math.round((currentScore - originalScore) * 100) / 100,
+      };
+    }
+  }
+
+  return {
+    current,
+
+    original,
+
+    history,
+
+    comparison,
+
+    currentVersion: Number(current.version) || 1,
+
+    answerVersion:
+      Number(current?.metadata?.answerVersion) ||
+      Number(current?.answer?.submissionVersion) ||
+      1,
+  };
 };
 
 // ============================================================
@@ -602,17 +2548,15 @@ const getEvaluation = async (userId, interviewId, questionId) => {
 // ============================================================
 
 const getInterviewEvaluations = async (userId, interviewId) => {
-  const interview = await Interview.findOne({
-    _id: interviewId,
-    user: userId,
-  }).lean();
+  validateObjectId(userId, "user ID");
 
-  if (!interview) {
-    throw new Error("Interview not found");
-  }
+  validateObjectId(interviewId, "interview ID");
 
-  return Evaluation.find({
+  await getOwnedInterview(userId, interviewId);
+
+  const allEvaluations = await Evaluation.find({
     interview: interviewId,
+    status: "completed",
   })
     .populate("question")
     .populate("answer")
@@ -620,6 +2564,14 @@ const getInterviewEvaluations = async (userId, interviewId) => {
       createdAt: 1,
     })
     .lean();
+
+  const latestEvaluations = getLatestEvaluations(allEvaluations);
+
+  return {
+    current: latestEvaluations,
+
+    history: allEvaluations,
+  };
 };
 
 // ============================================================
@@ -628,6 +2580,11 @@ const getInterviewEvaluations = async (userId, interviewId) => {
 
 module.exports = {
   evaluateAnswer,
+  reEvaluateAnswer,
+  reEvaluateInterview,
+
   getEvaluation,
   getInterviewEvaluations,
+
+  recalculateInterviewScores,
 };
