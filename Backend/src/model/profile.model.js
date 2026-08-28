@@ -106,12 +106,11 @@ const SkillEvidenceSchema = new mongoose.Schema(
 // SKILL ASSESSMENT SCHEMA
 // =========================================================
 //
-// IMPORTANT:
-//
 // The user NEVER sends:
+//
 // {
-//     name: "Python",
-//     level: "beginner"
+//   name: "Python",
+//   level: "beginner"
 // }
 //
 // The backend calculates the level.
@@ -184,14 +183,13 @@ const SkillAssessmentSchema = new mongoose.Schema(
 // Example:
 //
 // {
-//     name: "Python"
+//   name: "Python"
 // }
 //
 // The backend later determines:
 //
 // level: "intermediate"
 //
-// =========================================================
 
 const SkillSchema = new mongoose.Schema(
   {
@@ -277,7 +275,6 @@ const GithubEvidenceSchema = new mongoose.Schema(
           },
         },
       ],
-
       default: [],
     },
 
@@ -321,6 +318,31 @@ const ProfileSchema = new mongoose.Schema(
     },
 
     // =======================================================
+    // ROLE
+    // =======================================================
+    //
+    // User's professional / target role.
+    //
+    // Examples:
+    //
+    // Full Stack Developer
+    // Backend Developer
+    // Frontend Developer
+    // Software Engineer
+    // Data Analyst
+    // AI/ML Engineer
+    //
+    // This belongs to PROFILE, not USER.
+    //
+
+    role: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: "",
+    },
+
+    // =======================================================
     // PROFILE PICTURE
     // =======================================================
 
@@ -343,8 +365,8 @@ const ProfileSchema = new mongoose.Schema(
     // Example:
     //
     // [
-    //     { name: "Python" },
-    //     { name: "JavaScript" }
+    //   { name: "Python" },
+    //   { name: "JavaScript" }
     // ]
     //
     // Backend later determines their levels.
@@ -364,8 +386,8 @@ const ProfileSchema = new mongoose.Schema(
     // Example:
     //
     // [
-    //     { name: "Communication" },
-    //     { name: "Leadership" }
+    //   { name: "Communication" },
+    //   { name: "Leadership" }
     // ]
     //
 

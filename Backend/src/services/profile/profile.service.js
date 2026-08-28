@@ -1,3 +1,4 @@
+
 const ProfileModel = require("../../model/profile.model");
 const UserModel = require("../../model/user.model");
 
@@ -15,65 +16,27 @@ const {
 
 function createProfileError(message, statusCode, code) {
   const error = new Error(message);
-
   error.statusCode = statusCode;
   error.code = code;
-
   return error;
 }
 
 // =========================================================
 // PARSE SKILLS
 // =========================================================
-//
-// Multipart/form-data may send arrays as JSON strings.
-//
-// Accepted:
-//
-// [
-//   { name: "Python" },
-//   { name: "JavaScript" }
-// ]
-//
-// Also accepted:
-//
-// "[{\"name\":\"Python\"}]"
-//
-// IMPORTANT:
-//
-// The user is allowed to provide ONLY the skill name.
-//
-// The following is NOT allowed:
-//
-// {
-//   name: "Python",
-//   level: "beginner"
-// }
-//
-// Skill level is determined later by the assessment system.
-//
 
 function parseSkills(skills, type) {
-  // -------------------------------------------------------
   // Already an array
-  // -------------------------------------------------------
-
   if (Array.isArray(skills)) {
     return skills;
   }
 
-  // -------------------------------------------------------
   // Missing / intentionally empty
-  // -------------------------------------------------------
-
   if (skills === undefined || skills === null || skills === "") {
     return [];
   }
 
-  // -------------------------------------------------------
-  // Multipart sends JSON as string
-  // -------------------------------------------------------
-
+  // Multipart/form-data sends JSON arrays as strings
   if (typeof skills === "string") {
     try {
       const parsed = JSON.parse(skills);
@@ -84,7 +47,7 @@ function parseSkills(skills, type) {
           400,
           type === "technical"
             ? "INVALID_TECHNICAL_SKILLS"
-            : "INVALID_SOCIAL_SKILLS",
+            : "INVALID_SOCIAL_SKILLS"
         );
       }
 
@@ -99,35 +62,23 @@ function parseSkills(skills, type) {
         400,
         type === "technical"
           ? "INVALID_TECHNICAL_SKILLS"
-          : "INVALID_SOCIAL_SKILLS",
+          : "INVALID_SOCIAL_SKILLS"
       );
     }
   }
 
-  // -------------------------------------------------------
-  // Invalid type
-  // -------------------------------------------------------
-
   throw createProfileError(
     `${type} skills must be an array`,
     400,
-    type === "technical" ? "INVALID_TECHNICAL_SKILLS" : "INVALID_SOCIAL_SKILLS",
+    type === "technical"
+      ? "INVALID_TECHNICAL_SKILLS"
+      : "INVALID_SOCIAL_SKILLS"
   );
 }
 
 // =========================================================
 // NORMALIZE SKILLS
 // =========================================================
-//
-// IMPORTANT:
-//
-// This function intentionally keeps ONLY the name.
-//
-// We do NOT accept user-provided level.
-//
-// Existing AI assessment is preserved separately by
-// mergeSkillsWithExistingAssessment().
-//
 
 function normalizeSkills(skills) {
   return skills.map((skill) => ({
@@ -138,84 +89,41 @@ function normalizeSkills(skills) {
 // =========================================================
 // MERGE EXISTING AI ASSESSMENT
 // =========================================================
-//
-// This is extremely important.
-//
-// Example existing database:
-//
-// {
-//   name: "Python",
-//   level: "intermediate",
-//   assessment: {
-//     score: 72,
-//     confidence: 0.88
-//   }
-// }
-//
-// User updates profile with:
-//
-// {
-//   name: "Python"
-// }
-//
-// We MUST preserve:
-//
-// level: "intermediate"
-// assessment: {...}
-//
-// For a completely new skill:
-//
-// {
-//   name: "Java"
-// }
-//
-// it starts as:
-//
-// {
-//   name: "Java",
-//   level: null,
-//   assessment: {...default}
-// }
-//
-// The assessment system will evaluate it later.
-//
 
-function mergeSkillsWithExistingAssessment(newSkills, existingSkills = []) {
+function mergeSkillsWithExistingAssessment(
+  newSkills,
+  existingSkills = []
+) {
   return newSkills.map((newSkill) => {
+    const normalizedName = newSkill.name.trim().toLowerCase();
+
     const existingSkill = existingSkills.find(
       (skill) =>
-        skill.name.trim().toLowerCase() === newSkill.name.trim().toLowerCase(),
+        skill.name &&
+        skill.name.trim().toLowerCase() === normalizedName
     );
 
-    // -----------------------------------------------------
-    // Existing skill
-    // -----------------------------------------------------
-    //
-    // Preserve AI-generated level and assessment.
-    //
-
+    // Existing skill:
+    // preserve AI-generated level + assessment
     if (existingSkill) {
       return {
         name: newSkill.name,
 
-        level: existingSkill.level ?? null,
+        level:
+          existingSkill.level !== undefined
+            ? existingSkill.level
+            : null,
 
-        assessment: existingSkill.assessment ?? {},
+        assessment:
+          existingSkill.assessment || {},
       };
     }
 
-    // -----------------------------------------------------
-    // New skill
-    // -----------------------------------------------------
-    //
-    // No level until the assessment engine evaluates it.
-    //
-
+    // New skill:
+    // AI assessment will happen later
     return {
       name: newSkill.name,
-
       level: null,
-
       assessment: {},
     };
   });
@@ -237,7 +145,7 @@ function validateDuplicateSkills(skills, type) {
         400,
         type === "technical"
           ? "DUPLICATE_TECHNICAL_SKILL"
-          : "DUPLICATE_SOCIAL_SKILL",
+          : "DUPLICATE_SOCIAL_SKILL"
       );
     }
 
@@ -248,128 +156,75 @@ function validateDuplicateSkills(skills, type) {
 // =========================================================
 // VALIDATE SKILLS
 // =========================================================
-//
-// Skills are optional.
-//
-// Valid:
-//
-// []
-//
-// [
-//   { name: "Python" }
-// ]
-//
-// Invalid:
-//
-// [
-//   { name: "Python", level: "beginner" }
-// ]
-//
 
 function validateSkills(skills, type) {
-  // -------------------------------------------------------
-  // Must be array
-  // -------------------------------------------------------
-
   if (!Array.isArray(skills)) {
     throw createProfileError(
       `${type} skills must be an array`,
       400,
       type === "technical"
         ? "INVALID_TECHNICAL_SKILLS"
-        : "INVALID_SOCIAL_SKILLS",
+        : "INVALID_SOCIAL_SKILLS"
     );
   }
-
-  // -------------------------------------------------------
-  // Empty array is valid
-  // -------------------------------------------------------
 
   if (skills.length === 0) {
     return;
   }
 
-  // -------------------------------------------------------
-  // Validate every skill
-  // -------------------------------------------------------
-
   for (const skill of skills) {
-    // -----------------------------------------------------
     // Must be object
-    // -----------------------------------------------------
-
-    if (!skill || typeof skill !== "object" || Array.isArray(skill)) {
+    if (
+      !skill ||
+      typeof skill !== "object" ||
+      Array.isArray(skill)
+    ) {
       throw createProfileError(
         `Each ${type} skill must be an object`,
         400,
         type === "technical"
           ? "INVALID_TECHNICAL_SKILL"
-          : "INVALID_SOCIAL_SKILL",
+          : "INVALID_SOCIAL_SKILL"
       );
     }
 
-    // -----------------------------------------------------
     // Name required
-    // -----------------------------------------------------
-
-    if (!skill.name || typeof skill.name !== "string" || !skill.name.trim()) {
+    if (
+      !skill.name ||
+      typeof skill.name !== "string" ||
+      !skill.name.trim()
+    ) {
       throw createProfileError(
         `Each ${type} skill must have a name`,
         400,
         type === "technical"
           ? "TECHNICAL_SKILL_NAME_REQUIRED"
-          : "SOCIAL_SKILL_NAME_REQUIRED",
+          : "SOCIAL_SKILL_NAME_REQUIRED"
       );
     }
 
-    // -----------------------------------------------------
-    // LEVEL MUST NOT BE PROVIDED BY USER
-    // -----------------------------------------------------
-    //
-    // This prevents the frontend from saying:
-    //
-    // Python = advanced
-    //
-    // The assessment engine is the ONLY component that
-    // should determine the level.
-    //
-
-    if (Object.prototype.hasOwnProperty.call(skill, "level")) {
+    // User cannot provide level
+    if (
+      Object.prototype.hasOwnProperty.call(skill, "level")
+    ) {
       throw createProfileError(
-        `${type} skill level must not be provided. Skill level is determined by AI assessment.`,
+        "Skill level must not be provided. Skill level is determined by AI assessment.",
         400,
-        "SKILL_LEVEL_NOT_ALLOWED",
+        "SKILL_LEVEL_NOT_ALLOWED"
       );
     }
 
-    // -----------------------------------------------------
-    // ASSESSMENT MUST NOT BE PROVIDED BY USER
-    // -----------------------------------------------------
-    //
-    // The same principle applies to assessment data.
-    //
-    // The frontend must not be able to submit:
-    //
-    // {
-    //   name: "Python",
-    //   assessment: {
-    //     score: 90
-    //   }
-    // }
-    //
-
-    if (Object.prototype.hasOwnProperty.call(skill, "assessment")) {
+    // User cannot provide assessment
+    if (
+      Object.prototype.hasOwnProperty.call(skill, "assessment")
+    ) {
       throw createProfileError(
-        `${type} skill assessment must not be provided. Skill assessment is generated by the system.`,
+        "Skill assessment must not be provided. Skill assessment is generated by the system.",
         400,
-        "SKILL_ASSESSMENT_NOT_ALLOWED",
+        "SKILL_ASSESSMENT_NOT_ALLOWED"
       );
     }
   }
-
-  // -------------------------------------------------------
-  // Duplicate validation
-  // -------------------------------------------------------
 
   validateDuplicateSkills(skills, type);
 }
@@ -395,15 +250,18 @@ function normalizeOptionalString(value) {
 // =========================================================
 
 async function getProfile(userId) {
-  const user = await UserModel.findById(userId).select("username email");
+  const user = await UserModel.findById(userId)
+    .select("username email");
 
   if (!user) {
-    throw createProfileError("User not found", 404, "USER_NOT_FOUND");
+    throw createProfileError(
+      "User not found",
+      404,
+      "USER_NOT_FOUND"
+    );
   }
 
-  const profile = await ProfileModel.findOne({
-    userId,
-  });
+  const profile = await ProfileModel.findOne({ userId });
 
   // =======================================================
   // PROFILE DOES NOT EXIST
@@ -418,6 +276,8 @@ async function getProfile(userId) {
       username: user.username,
 
       email: user.email,
+
+      role: "",
 
       profilePicture: null,
 
@@ -447,7 +307,8 @@ async function getProfile(userId) {
   // EXISTING PROFILE
   // =======================================================
 
-  const profileCompletion = calculateProfileCompletion(profile);
+  const profileCompletion =
+    calculateProfileCompletion(profile);
 
   return {
     profileExists: true,
@@ -458,9 +319,12 @@ async function getProfile(userId) {
 
     email: user.email,
 
+    role: profile.role || "",
+
     profilePicture: profile.profilePicture || null,
 
-    profilePictureFileId: profile.profilePictureFileId || null,
+    profilePictureFileId:
+      profile.profilePictureFileId || null,
 
     technicalSkills: profile.technicalSkills || [],
 
@@ -491,32 +355,56 @@ async function updateProfile(userId, data, files = {}) {
   // GET EXISTING PROFILE
   // =======================================================
 
-  const existingProfile = await ProfileModel.findOne({ userId });
+  const existingProfile = await ProfileModel.findOne({
+    userId,
+  });
 
   // =======================================================
-  // DETERMINE WHICH BODY FIELDS WERE PROVIDED
+  // DETERMINE PROVIDED FIELDS
   // =======================================================
 
-  const hasTechnicalSkills = Object.prototype.hasOwnProperty.call(
+  const hasName = Object.prototype.hasOwnProperty.call(
     data,
-    "technicalSkills",
+    "name"
   );
 
-  const hasSocialSkills = Object.prototype.hasOwnProperty.call(
+  const hasRole = Object.prototype.hasOwnProperty.call(
     data,
-    "socialSkills",
+    "role"
   );
 
-  const hasName = Object.prototype.hasOwnProperty.call(data, "name");
+  const hasTechnicalSkills =
+    Object.prototype.hasOwnProperty.call(
+      data,
+      "technicalSkills"
+    );
 
-  const hasLinkedin = Object.prototype.hasOwnProperty.call(data, "linkedin");
+  const hasSocialSkills =
+    Object.prototype.hasOwnProperty.call(
+      data,
+      "socialSkills"
+    );
 
-  const hasGithub = Object.prototype.hasOwnProperty.call(data, "github");
+  const hasLinkedin =
+    Object.prototype.hasOwnProperty.call(
+      data,
+      "linkedin"
+    );
 
-  const hasLeetcode = Object.prototype.hasOwnProperty.call(data, "leetcode");
+  const hasGithub =
+    Object.prototype.hasOwnProperty.call(
+      data,
+      "github"
+    );
+
+  const hasLeetcode =
+    Object.prototype.hasOwnProperty.call(
+      data,
+      "leetcode"
+    );
 
   // =======================================================
-  // PARSE AND VALIDATE SKILLS
+  // PARSE + VALIDATE SKILLS
   // =======================================================
 
   let normalizedTechnicalSkills;
@@ -527,16 +415,21 @@ async function updateProfile(userId, data, files = {}) {
   // -------------------------------------------------------
 
   if (hasTechnicalSkills) {
-    const technicalSkills = parseSkills(data.technicalSkills, "technical");
-
-    validateSkills(technicalSkills, "technical");
-
-    const normalizedSkills = normalizeSkills(technicalSkills);
-
-    normalizedTechnicalSkills = mergeSkillsWithExistingAssessment(
-      normalizedSkills,
-      existingProfile?.technicalSkills || [],
+    const technicalSkills = parseSkills(
+      data.technicalSkills,
+      "technical"
     );
+
+    validateSkills(
+      technicalSkills,
+      "technical"
+    );
+
+    normalizedTechnicalSkills =
+      mergeSkillsWithExistingAssessment(
+        normalizeSkills(technicalSkills),
+        existingProfile?.technicalSkills || []
+      );
   }
 
   // -------------------------------------------------------
@@ -544,28 +437,35 @@ async function updateProfile(userId, data, files = {}) {
   // -------------------------------------------------------
 
   if (hasSocialSkills) {
-    const socialSkills = parseSkills(data.socialSkills, "social");
-
-    validateSkills(socialSkills, "social");
-
-    const normalizedSkills = normalizeSkills(socialSkills);
-
-    normalizedSocialSkills = mergeSkillsWithExistingAssessment(
-      normalizedSkills,
-      existingProfile?.socialSkills || [],
+    const socialSkills = parseSkills(
+      data.socialSkills,
+      "social"
     );
+
+    validateSkills(
+      socialSkills,
+      "social"
+    );
+
+    normalizedSocialSkills =
+      mergeSkillsWithExistingAssessment(
+        normalizeSkills(socialSkills),
+        existingProfile?.socialSkills || []
+      );
   }
 
   // =======================================================
   // GET UPLOADED FILES
   // =======================================================
 
-  const profilePictureFile = files?.profilePicture?.[0] || null;
+  const profilePictureFile =
+    files?.profilePicture?.[0] || null;
 
-  const resumeFile = files?.resume?.[0] || null;
+  const resumeFile =
+    files?.resume?.[0] || null;
 
   // =======================================================
-  // NEW IMAGEKIT FILES
+  // NEW UPLOADS
   // =======================================================
 
   let newProfilePicture = null;
@@ -573,26 +473,30 @@ async function updateProfile(userId, data, files = {}) {
 
   try {
     // =====================================================
-    // UPLOAD NEW PROFILE PICTURE
+    // PROFILE PICTURE
     // =====================================================
 
     if (profilePictureFile) {
-      newProfilePicture = await uploadProfilePicture(
-        profilePictureFile,
-        userId,
+      newProfilePicture =
+        await uploadProfilePicture(
+          profilePictureFile,
+          userId
+        );
+    }
+
+    // =====================================================
+    // RESUME
+    // =====================================================
+
+    if (resumeFile) {
+      newResume = await uploadResume(
+        resumeFile,
+        userId
       );
     }
 
     // =====================================================
-    // UPLOAD NEW RESUME
-    // =====================================================
-
-    if (resumeFile) {
-      newResume = await uploadResume(resumeFile, userId);
-    }
-
-    // =====================================================
-    // DETERMINE PROFILE PICTURE
+    // PROFILE PICTURE DATA
     // =====================================================
 
     const profilePictureUrl = newProfilePicture
@@ -604,7 +508,7 @@ async function updateProfile(userId, data, files = {}) {
       : existingProfile?.profilePictureFileId || null;
 
     // =====================================================
-    // DETERMINE RESUME
+    // RESUME DATA
     // =====================================================
 
     const resumeUrl = newResume
@@ -626,7 +530,21 @@ async function updateProfile(userId, data, files = {}) {
     // =====================================================
 
     if (hasName) {
-      updateFields.name = typeof data.name === "string" ? data.name.trim() : "";
+      updateFields.name =
+        typeof data.name === "string"
+          ? data.name.trim()
+          : "";
+    }
+
+    // =====================================================
+    // ROLE
+    // =====================================================
+
+    if (hasRole) {
+      updateFields.role =
+        typeof data.role === "string"
+          ? data.role.trim()
+          : "";
     }
 
     // =====================================================
@@ -634,7 +552,8 @@ async function updateProfile(userId, data, files = {}) {
     // =====================================================
 
     if (hasTechnicalSkills) {
-      updateFields.technicalSkills = normalizedTechnicalSkills;
+      updateFields.technicalSkills =
+        normalizedTechnicalSkills;
     }
 
     // =====================================================
@@ -642,7 +561,8 @@ async function updateProfile(userId, data, files = {}) {
     // =====================================================
 
     if (hasSocialSkills) {
-      updateFields.socialSkills = normalizedSocialSkills;
+      updateFields.socialSkills =
+        normalizedSocialSkills;
     }
 
     // =====================================================
@@ -650,7 +570,8 @@ async function updateProfile(userId, data, files = {}) {
     // =====================================================
 
     if (hasLinkedin) {
-      updateFields.linkedin = normalizeOptionalString(data.linkedin);
+      updateFields.linkedin =
+        normalizeOptionalString(data.linkedin);
     }
 
     // =====================================================
@@ -658,7 +579,8 @@ async function updateProfile(userId, data, files = {}) {
     // =====================================================
 
     if (hasGithub) {
-      updateFields.github = normalizeOptionalString(data.github);
+      updateFields.github =
+        normalizeOptionalString(data.github);
     }
 
     // =====================================================
@@ -666,59 +588,96 @@ async function updateProfile(userId, data, files = {}) {
     // =====================================================
 
     if (hasLeetcode) {
-      updateFields.leetcode = normalizeOptionalString(data.leetcode);
+      updateFields.leetcode =
+        normalizeOptionalString(data.leetcode);
     }
 
     // =====================================================
     // FILES
     // =====================================================
 
-    updateFields.profilePicture = profilePictureUrl;
+    updateFields.profilePicture =
+      profilePictureUrl;
 
-    updateFields.profilePictureFileId = profilePictureFileId;
+    updateFields.profilePictureFileId =
+      profilePictureFileId;
 
-    updateFields.resume = resumeUrl;
+    updateFields.resume =
+      resumeUrl;
 
-    updateFields.resumeFileId = resumeFileId;
-
-    // =====================================================
-    // UPDATE / CREATE PROFILE
-    // =====================================================
-
-    const profile = await ProfileModel.findOneAndUpdate(
-      { userId },
-      {
-        $set: updateFields,
-      },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-        setDefaultsOnInsert: true,
-      },
-    );
+    updateFields.resumeFileId =
+      resumeFileId;
 
     // =====================================================
-    // DELETE OLD PROFILE PICTURE
+    // CREATE / UPDATE PROFILE
     // =====================================================
 
-    if (newProfilePicture && existingProfile?.profilePictureFileId) {
-      await deleteFile(existingProfile.profilePictureFileId);
+    const profile =
+      await ProfileModel.findOneAndUpdate(
+        { userId },
+
+        {
+          $set: updateFields,
+        },
+
+        {
+          new: true,
+          upsert: true,
+          runValidators: true,
+          setDefaultsOnInsert: true,
+        }
+      );
+
+    // =====================================================
+    // DELETE OLD FILES
+    // =====================================================
+
+    // Important:
+    // Database has already been successfully updated.
+    // Therefore failure while deleting an old file should
+    // NOT delete the newly uploaded file.
+
+    if (
+      newProfilePicture &&
+      existingProfile?.profilePictureFileId &&
+      existingProfile.profilePictureFileId !==
+        newProfilePicture.fileId
+    ) {
+      try {
+        await deleteFile(
+          existingProfile.profilePictureFileId
+        );
+      } catch (deleteError) {
+        console.error(
+          "Failed to delete old profile picture:",
+          deleteError
+        );
+      }
     }
 
-    // =====================================================
-    // DELETE OLD RESUME
-    // =====================================================
-
-    if (newResume && existingProfile?.resumeFileId) {
-      await deleteFile(existingProfile.resumeFileId);
+    if (
+      newResume &&
+      existingProfile?.resumeFileId &&
+      existingProfile.resumeFileId !== newResume.fileId
+    ) {
+      try {
+        await deleteFile(
+          existingProfile.resumeFileId
+        );
+      } catch (deleteError) {
+        console.error(
+          "Failed to delete old resume:",
+          deleteError
+        );
+      }
     }
 
     // =====================================================
     // PROFILE COMPLETION
     // =====================================================
 
-    const profileCompletion = calculateProfileCompletion(profile);
+    const profileCompletion =
+      calculateProfileCompletion(profile);
 
     // =====================================================
     // RETURN
@@ -731,15 +690,33 @@ async function updateProfile(userId, data, files = {}) {
   } catch (error) {
     // =====================================================
     // DATABASE / PROCESSING FAILED
-    // CLEAN NEW FILES
+    // CLEAN ONLY NEWLY UPLOADED FILES
     // =====================================================
 
     if (newProfilePicture?.fileId) {
-      await deleteFile(newProfilePicture.fileId);
+      try {
+        await deleteFile(
+          newProfilePicture.fileId
+        );
+      } catch (cleanupError) {
+        console.error(
+          "Failed to cleanup new profile picture:",
+          cleanupError
+        );
+      }
     }
 
     if (newResume?.fileId) {
-      await deleteFile(newResume.fileId);
+      try {
+        await deleteFile(
+          newResume.fileId
+        );
+      } catch (cleanupError) {
+        console.error(
+          "Failed to cleanup new resume:",
+          cleanupError
+        );
+      }
     }
 
     throw error;

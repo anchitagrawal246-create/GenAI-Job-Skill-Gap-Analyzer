@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from "react";
 import {
   FiArrowLeft,
@@ -13,8 +14,15 @@ import {
   FiUpload,
   FiPlus,
   FiX,
+  FiBriefcase,
+  FiCheckCircle,
+  FiShield,
+  FiLink,
+  FiStar,
+  FiChevronRight,
 } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
+
 import { getMyProfile, updateProfile } from "../../api/profile.api";
 
 const Profile = () => {
@@ -27,6 +35,7 @@ const Profile = () => {
 
   const [form, setForm] = useState({
     name: "",
+    targetRole: "",
     github: "",
     linkedin: "",
     leetcode: "",
@@ -36,17 +45,14 @@ const Profile = () => {
 
   const [profileImage, setProfileImage] = useState(null);
   const [resumeFile, setResumeFile] = useState(null);
-
-  // Can contain:
-  // 1. temporary blob URL
-  // 2. permanent ImageKit URL
   const [preview, setPreview] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
 
-  // Skill input states
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("info");
+
   const [technicalSkillInput, setTechnicalSkillInput] = useState("");
   const [socialSkillInput, setSocialSkillInput] = useState("");
 
@@ -58,13 +64,11 @@ const Profile = () => {
     loadProfile();
 
     return () => {
-      // Cleanup temporary blob URL
-      setPreview((currentPreview) => {
-        if (currentPreview?.startsWith("blob:")) {
-          URL.revokeObjectURL(currentPreview);
+      setPreview((current) => {
+        if (current?.startsWith("blob:")) {
+          URL.revokeObjectURL(current);
         }
-
-        return currentPreview;
+        return current;
       });
     };
   }, []);
@@ -76,53 +80,45 @@ const Profile = () => {
 
       const response = await getMyProfile();
 
-      console.log("PROFILE API RESPONSE:", response);
-
       const data =
         response?.profile ||
         response?.data?.profile ||
         response?.data ||
         response;
 
-      console.log("PROFILE DATA:", data);
-      console.log("SAVED IMAGEKIT URL:", data?.profilePicture);
-      console.log("SAVED RESUME:", data?.resume);
-
       setProfile(data);
 
-      // ========================================================
-      // FORM DATA
-      // ========================================================
+      const technicalSkills = Array.isArray(data?.technicalSkills)
+        ? data.technicalSkills
+        : [];
+
+      const socialSkills = Array.isArray(data?.socialSkills)
+        ? data.socialSkills
+        : [];
+
+      const role =
+        data?.targetRole?.trim() ||
+        data?.role?.trim() ||
+        "";
 
       setForm({
         name: data?.name || "",
+        targetRole: role,
         github: data?.github || "",
         linkedin: data?.linkedin || "",
         leetcode: data?.leetcode || "",
-
-        technicalSkills: Array.isArray(data?.technicalSkills)
-          ? data.technicalSkills
-          : [],
-
-        socialSkills: Array.isArray(data?.socialSkills)
-          ? data.socialSkills
-          : [],
+        technicalSkills,
+        socialSkills,
       });
 
-      // ========================================================
-      // PROFILE PICTURE
-      // ========================================================
-
-      if (data?.profilePicture) {
-        setPreview(data.profilePicture);
-      } else {
-        setPreview("");
-      }
+      setPreview(data?.profilePicture || "");
     } catch (error) {
       console.error("Profile loading failed:", error);
 
-      setMessage(
-        error?.response?.data?.message || "Unable to load your profile.",
+      showMessage(
+        error?.response?.data?.message ||
+          "Unable to load your profile.",
+        "error"
       );
     } finally {
       setLoading(false);
@@ -130,45 +126,152 @@ const Profile = () => {
   };
 
   // ============================================================
-  // PROFILE IMAGE
+  // MESSAGE
+  // ============================================================
+
+  const showMessage = (text, type = "info") => {
+    setMessage(text);
+    setMessageType(type);
+  };
+
+  // ============================================================
+  // NORMALIZE
+  // ============================================================
+
+  const normalizeSkillName = (skill) => {
+    if (!skill) return "";
+
+    if (typeof skill === "string") {
+      return skill.trim();
+    }
+
+    return (
+      skill?.name ||
+      skill?.skill ||
+      skill?.title ||
+      ""
+    ).trim();
+  };
+
+  // ============================================================
+  // GITHUB SKILLS
+  // ============================================================
+
+  const getGithubSkills = () => {
+    const evidence = profile?.githubEvidence;
+
+    if (!evidence) return [];
+
+    const skills = Array.isArray(evidence?.skills)
+      ? evidence.skills
+      : [];
+
+    const languages = Array.isArray(evidence?.languages)
+      ? evidence.languages
+      : [];
+
+    const unique = new Map();
+
+    [...skills, ...languages].forEach((skill) => {
+      const name = normalizeSkillName(skill);
+
+      if (!name) return;
+
+      const key = name.toLowerCase();
+
+      if (!unique.has(key)) {
+        unique.set(key, name);
+      }
+    });
+
+    return Array.from(unique.values());
+  };
+
+  // ============================================================
+  // MERGED TECHNICAL SKILLS
+  // ============================================================
+
+  const getMergedTechnicalSkills = () => {
+    const manualSkills = Array.isArray(form.technicalSkills)
+      ? form.technicalSkills
+      : [];
+
+    const githubSkills = getGithubSkills();
+
+    const merged = new Map();
+
+    manualSkills.forEach((skill) => {
+      const name = normalizeSkillName(skill);
+
+      if (!name) return;
+
+      merged.set(name.toLowerCase(), {
+        name,
+        level:
+          typeof skill === "object"
+            ? skill?.level
+            : undefined,
+        githubDetected: false,
+      });
+    });
+
+    githubSkills.forEach((name) => {
+      const key = name.toLowerCase();
+
+      if (merged.has(key)) {
+        const old = merged.get(key);
+
+        merged.set(key, {
+          ...old,
+          name,
+          githubDetected: true,
+        });
+      } else {
+        merged.set(key, {
+          name,
+          githubDetected: true,
+        });
+      }
+    });
+
+    return Array.from(merged.values());
+  };
+
+  // ============================================================
+  // IMAGE
   // ============================================================
 
   const handleImageChange = (event) => {
     const file = event.target.files?.[0];
 
-    if (!file) {
-      return;
-    }
+    if (!file) return;
 
-    // Validate image
     if (!file.type.startsWith("image/")) {
-      setMessage("Please select a valid image file.");
+      showMessage("Please select a valid image file.", "error");
       event.target.value = "";
       return;
     }
 
-    // 5 MB limit
     if (file.size > 5 * 1024 * 1024) {
-      setMessage("Profile picture must be smaller than 5MB.");
+      showMessage(
+        "Profile picture must be smaller than 5MB.",
+        "error"
+      );
       event.target.value = "";
       return;
     }
 
-    // Remove previous temporary preview
     if (preview?.startsWith("blob:")) {
       URL.revokeObjectURL(preview);
     }
 
-    // Save file for upload
-    setProfileImage(file);
-
-    // Create temporary preview
     const imageUrl = URL.createObjectURL(file);
+
+    setProfileImage(file);
     setPreview(imageUrl);
 
-    setMessage("");
+    showMessage("", "info");
 
-    // Allow selecting same file again
     event.target.value = "";
   };
 
@@ -179,35 +282,34 @@ const Profile = () => {
   const handleResumeChange = (event) => {
     const file = event.target.files?.[0];
 
-    if (!file) {
-      return;
-    }
+    if (!file) return;
 
-    // PDF only
     if (file.type !== "application/pdf") {
-      setMessage("Please select a PDF resume.");
+      showMessage(
+        "Please select a PDF resume.",
+        "error"
+      );
       event.target.value = "";
       return;
     }
 
-    // 10 MB limit
     if (file.size > 10 * 1024 * 1024) {
-      setMessage("Resume must be smaller than 10MB.");
+      showMessage(
+        "Resume must be smaller than 10MB.",
+        "error"
+      );
       event.target.value = "";
       return;
     }
 
-    // Store new resume temporarily
     setResumeFile(file);
+    showMessage("", "info");
 
-    setMessage("");
-
-    // Allow selecting same file again
     event.target.value = "";
   };
 
   // ============================================================
-  // FORM CHANGE
+  // FORM
   // ============================================================
 
   const handleChange = (event) => {
@@ -220,109 +322,137 @@ const Profile = () => {
   };
 
   // ============================================================
-  // ADD TECHNICAL SKILL
+  // TECHNICAL SKILL
   // ============================================================
 
   const addTechnicalSkill = () => {
     const skillName = technicalSkillInput.trim();
 
-    if (!skillName) {
+    if (!skillName) return;
+
+    const githubSkills = getGithubSkills();
+
+    if (
+      githubSkills.some(
+        (skill) =>
+          skill.toLowerCase() ===
+          skillName.toLowerCase()
+      )
+    ) {
+      showMessage(
+        `"${skillName}" is already detected from GitHub.`,
+        "info"
+      );
+
+      setTechnicalSkillInput("");
       return;
     }
 
-    const exists = form.technicalSkills.some((skill) => {
-      const name = typeof skill === "string" ? skill : skill?.name;
-
-      return name?.trim().toLowerCase() === skillName.toLowerCase();
-    });
+    const exists = form.technicalSkills.some(
+      (skill) =>
+        normalizeSkillName(skill).toLowerCase() ===
+        skillName.toLowerCase()
+    );
 
     if (exists) {
-      setMessage("This technical skill is already added.");
+      showMessage(
+        "This technical skill is already added.",
+        "info"
+      );
       return;
     }
 
     setForm((previous) => ({
       ...previous,
-
       technicalSkills: [
         ...previous.technicalSkills,
-        {
-          name: skillName,
-        },
+        { name: skillName },
       ],
     }));
 
     setTechnicalSkillInput("");
-    setMessage("");
+    showMessage("", "info");
   };
 
   // ============================================================
-  // ADD SOCIAL SKILL
+  // SOCIAL SKILL
   // ============================================================
 
   const addSocialSkill = () => {
     const skillName = socialSkillInput.trim();
 
-    if (!skillName) {
-      return;
-    }
+    if (!skillName) return;
 
-    const exists = form.socialSkills.some((skill) => {
-      const name = typeof skill === "string" ? skill : skill?.name;
-
-      return name?.trim().toLowerCase() === skillName.toLowerCase();
-    });
+    const exists = form.socialSkills.some(
+      (skill) =>
+        normalizeSkillName(skill).toLowerCase() ===
+        skillName.toLowerCase()
+    );
 
     if (exists) {
-      setMessage("This social skill is already added.");
+      showMessage(
+        "This social skill is already added.",
+        "info"
+      );
       return;
     }
 
     setForm((previous) => ({
       ...previous,
-
       socialSkills: [
         ...previous.socialSkills,
-        {
-          name: skillName,
-        },
+        { name: skillName },
       ],
     }));
 
     setSocialSkillInput("");
-    setMessage("");
+    showMessage("", "info");
   };
 
   // ============================================================
-  // REMOVE TECHNICAL SKILL
+  // REMOVE
   // ============================================================
 
-  const removeTechnicalSkill = (indexToRemove) => {
+  const removeTechnicalSkill = (nameToRemove) => {
+    const githubSkills = getGithubSkills();
+
+    if (
+      githubSkills.some(
+        (skill) =>
+          skill.toLowerCase() ===
+          nameToRemove.toLowerCase()
+      )
+    ) {
+      showMessage(
+        `"${nameToRemove}" is detected from GitHub and cannot be removed.`,
+        "info"
+      );
+      return;
+    }
+
     setForm((previous) => ({
       ...previous,
+      technicalSkills:
+        previous.technicalSkills.filter(
+          (skill) =>
+            normalizeSkillName(skill).toLowerCase() !==
+            nameToRemove.toLowerCase()
+        ),
+    }));
+  };
 
-      technicalSkills: previous.technicalSkills.filter(
-        (_, index) => index !== indexToRemove,
-      ),
+  const removeSocialSkill = (index) => {
+    setForm((previous) => ({
+      ...previous,
+      socialSkills:
+        previous.socialSkills.filter(
+          (_, skillIndex) => skillIndex !== index
+        ),
     }));
   };
 
   // ============================================================
-  // REMOVE SOCIAL SKILL
-  // ============================================================
-
-  const removeSocialSkill = (indexToRemove) => {
-    setForm((previous) => ({
-      ...previous,
-
-      socialSkills: previous.socialSkills.filter(
-        (_, index) => index !== indexToRemove,
-      ),
-    }));
-  };
-
-  // ============================================================
-  // ENTER KEY FOR TECHNICAL SKILL
+  // ENTER
   // ============================================================
 
   const handleTechnicalSkillKeyDown = (event) => {
@@ -332,10 +462,6 @@ const Profile = () => {
     }
   };
 
-  // ============================================================
-  // ENTER KEY FOR SOCIAL SKILL
-  // ============================================================
-
   const handleSocialSkillKeyDown = (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -344,345 +470,435 @@ const Profile = () => {
   };
 
   // ============================================================
-  // SAVE PROFILE
+  // SAVE
   // ============================================================
 
   const handleSave = async () => {
     try {
       setSaving(true);
-      setMessage("");
+      showMessage("", "info");
 
       const formData = new FormData();
 
-      // ========================================================
-      // BASIC INFORMATION
-      // ========================================================
-
       formData.append("name", form.name || "");
 
-      // ========================================================
-      // SOCIAL LINKS
-      // ========================================================
+      formData.append(
+        "targetRole",
+        form.targetRole?.trim() || ""
+      );
 
       formData.append("github", form.github || "");
-
       formData.append("linkedin", form.linkedin || "");
-
       formData.append("leetcode", form.leetcode || "");
 
-      // ========================================================
-      // TECHNICAL SKILLS
-      // ========================================================
-
-      const technicalSkills = Array.isArray(form.technicalSkills)
+      const technicalSkills = Array.isArray(
+        form.technicalSkills
+      )
         ? form.technicalSkills
             .map((skill) => ({
-              name:
-                typeof skill === "string" ? skill.trim() : skill?.name?.trim(),
+              name: normalizeSkillName(skill),
             }))
             .filter((skill) => skill.name)
         : [];
 
-      formData.append("technicalSkills", JSON.stringify(technicalSkills));
+      formData.append(
+        "technicalSkills",
+        JSON.stringify(technicalSkills)
+      );
 
-      // ========================================================
-      // SOCIAL SKILLS
-      // ========================================================
-
-      const socialSkills = Array.isArray(form.socialSkills)
+      const socialSkills = Array.isArray(
+        form.socialSkills
+      )
         ? form.socialSkills
             .map((skill) => ({
-              name:
-                typeof skill === "string" ? skill.trim() : skill?.name?.trim(),
+              name: normalizeSkillName(skill),
             }))
             .filter((skill) => skill.name)
         : [];
 
-      formData.append("socialSkills", JSON.stringify(socialSkills));
-
-      // ========================================================
-      // PROFILE PICTURE
-      // ========================================================
-
-      // IMPORTANT:
-      // Only append if user selected a NEW image.
-      //
-      // If no new image is selected, backend keeps old image.
+      formData.append(
+        "socialSkills",
+        JSON.stringify(socialSkills)
+      );
 
       if (profileImage) {
-        formData.append("profilePicture", profileImage);
+        formData.append(
+          "profilePicture",
+          profileImage
+        );
       }
-
-      // ========================================================
-      // RESUME
-      // ========================================================
-
-      // IMPORTANT:
-      // Only append if user selected a NEW resume.
-      //
-      // If no new resume is selected, backend keeps old resume.
 
       if (resumeFile) {
         formData.append("resume", resumeFile);
       }
 
-      // ========================================================
-      // DEBUG
-      // ========================================================
-
-      console.log("PROFILE FORM DATA:");
-
-      for (const [key, value] of formData.entries()) {
-        console.log(
-          key,
-          value instanceof File
-            ? {
-                name: value.name,
-                type: value.type,
-                size: value.size,
-              }
-            : value,
-        );
-      }
-
-      // ========================================================
-      // API CALL
-      // ========================================================
-
       const response = await updateProfile(formData);
 
       console.log("PROFILE UPDATED:", response);
 
-      setMessage("Profile updated successfully.");
+      showMessage(
+        "Profile updated successfully.",
+        "success"
+      );
 
-      // Clear newly selected files
       setProfileImage(null);
       setResumeFile(null);
 
-      // Reload saved data from backend
       await loadProfile();
     } catch (error) {
       console.error("Profile update failed:", error);
 
-      console.error("Backend response:", error?.response?.data);
-
-      setMessage(error?.response?.data?.message || "Failed to update profile.");
+      showMessage(
+        error?.response?.data?.message ||
+          "Failed to update profile.",
+        "error"
+      );
     } finally {
       setSaving(false);
     }
   };
 
   // ============================================================
-  // PROFILE DATA
+  // DATA
   // ============================================================
 
-  const username = profile?.username || "username";
-
+  const username = profile?.username || "";
   const email = profile?.email || "";
 
   const displayName =
-    form.name || profile?.name || profile?.fullName || username || "Developer";
+    form.name ||
+    profile?.name ||
+    username ||
+    "User";
+
+  const profileCompletion =
+    Number(profile?.profileCompletion) || 0;
+
+  const mergedTechnicalSkills =
+    getMergedTechnicalSkills();
+
+  const githubSkills =
+    getGithubSkills();
+
+  const githubAnalyzed =
+    profile?.githubEvidence?.analyzed === true;
+
+  const githubRepositories =
+    profile?.githubEvidence?.repositoriesAnalyzed || 0;
+
+  // ============================================================
+  // LOADING
+  // ============================================================
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050507] text-white">
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="flex flex-col items-center">
+            <div className="relative mb-5 h-12 w-12">
+              <div className="absolute inset-0 rounded-full border border-violet-500/20" />
+              <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-violet-500" />
+            </div>
+
+            <p className="text-sm font-medium text-slate-400">
+              Loading your profile
+            </p>
+
+            <p className="mt-1 text-[11px] text-slate-700">
+              Preparing your career workspace...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ============================================================
   // RENDER
   // ============================================================
 
   return (
-    <div className="min-h-screen bg-[#05050a] text-white">
-      {/* ======================================================
-          BACKGROUND
-      ====================================================== */}
+    <div className="min-h-screen overflow-x-hidden bg-[#050507] text-white">
+      {/* ========================================================
+          AMBIENT BACKGROUND
+      ======================================================== */}
 
-      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full bg-violet-700/10 blur-[150px]" />
+
+        <div className="absolute right-[-180px] top-[25%] h-[500px] w-[500px] rounded-full bg-fuchsia-700/[0.07] blur-[150px]" />
+
+        <div className="absolute bottom-[-200px] left-[35%] h-[450px] w-[450px] rounded-full bg-indigo-700/[0.07] blur-[150px]" />
+
         <div
-          className="absolute inset-0 opacity-[0.06]"
+          className="absolute inset-0 opacity-[0.025]"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)",
-            backgroundSize: "40px 40px",
+              "linear-gradient(rgba(255,255,255,.5) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.5) 1px,transparent 1px)",
+            backgroundSize: "48px 48px",
           }}
         />
-
-        <div className="absolute left-[20%] top-[-200px] h-[500px] w-[500px] rounded-full bg-violet-600/20 blur-[130px]" />
-
-        <div className="absolute right-[-100px] top-[30%] h-[400px] w-[400px] rounded-full bg-fuchsia-600/10 blur-[120px]" />
       </div>
 
-      {/* ======================================================
+      {/* ========================================================
           HEADER
-      ====================================================== */}
+      ======================================================== */}
 
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-[#05050a]/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-20 max-w-6xl items-center justify-between px-5 sm:px-8">
-          <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#050507]/80 backdrop-blur-2xl">
+        <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => navigate("/dashboard")}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-400 transition hover:bg-white/[0.05] hover:text-white"
+              className="group flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-slate-500 transition-all duration-300 hover:border-violet-500/30 hover:bg-violet-500/[0.07] hover:text-white"
             >
-              <FiArrowLeft size={18} />
+              <FiArrowLeft
+                size={17}
+                className="transition-transform duration-300 group-hover:-translate-x-0.5"
+              />
             </button>
 
             <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-violet-400">
-                Career OS
-              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold uppercase tracking-[0.3em] text-violet-400">
+                  Career OS
+                </span>
 
-              <h1 className="mt-1 text-lg font-bold">Profile</h1>
+                <span className="h-1 w-1 rounded-full bg-slate-700" />
+
+                <span className="text-[9px] uppercase tracking-wider text-slate-700">
+                  Profile
+                </span>
+              </div>
+
+              <h1 className="mt-0.5 text-sm font-bold text-white">
+                Your professional identity
+              </h1>
             </div>
           </div>
 
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || loading}
-            className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={saving}
+            className="group flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-bold text-black shadow-xl shadow-white/[0.04] transition-all duration-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <FiSave size={15} />
+            <FiSave size={14} />
 
-            {saving ? "Saving..." : "Save changes"}
+            <span className="hidden sm:inline">
+              {saving ? "Saving..." : "Save changes"}
+            </span>
+
+            <span className="sm:hidden">{saving ? "..." : "Save"}</span>
           </button>
         </div>
       </header>
 
-      {/* ======================================================
-          CONTENT
-      ====================================================== */}
+      {/* ========================================================
+          MAIN
+      ======================================================== */}
 
-      <main className="mx-auto max-w-6xl p-5 sm:p-8">
-        {loading ? (
-          <div className="flex min-h-[500px] items-center justify-center">
-            <div className="text-sm text-slate-500">Loading profile...</div>
-          </div>
-        ) : (
-          <div className="space-y-6">
+      <main className="relative mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
+          {/* ====================================================
+              LEFT
+          ==================================================== */}
+
+          <div className="min-w-0 space-y-6">
             {/* ==================================================
-                PROFILE HERO
+                HERO
             ================================================== */}
 
-            <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.025] p-6 sm:p-8">
-              <div className="absolute right-[-100px] top-[-100px] h-72 w-72 rounded-full bg-violet-600/10 blur-[100px]" />
+            <section className="relative overflow-hidden rounded-[30px] border border-white/[0.08] bg-white/[0.025] shadow-2xl shadow-black/20">
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-500/60 to-transparent" />
 
-              <div className="relative flex flex-col gap-7 sm:flex-row sm:items-center">
-                {/* PROFILE IMAGE */}
+              <div className="absolute right-[-120px] top-[-160px] h-[380px] w-[380px] rounded-full bg-violet-600/[0.09] blur-[100px]" />
 
-                <div className="relative mx-auto sm:mx-0">
-                  {preview ? (
-                    <img
-                      src={preview}
-                      alt={displayName}
-                      className="h-32 w-32 rounded-3xl border border-violet-400/30 object-cover shadow-2xl shadow-violet-900/20"
-                      onError={(event) => {
-                        console.error("Profile image failed to load:", preview);
+              <div className="relative p-6 sm:p-8">
+                <div className="flex flex-col gap-7 sm:flex-row sm:items-center">
+                  {/* IMAGE */}
 
-                        event.currentTarget.style.display = "none";
-                      }}
+                  <div className="relative mx-auto shrink-0 sm:mx-0">
+                    <div className="absolute -inset-2 rounded-[32px] bg-gradient-to-br from-violet-500/20 to-fuchsia-500/10 blur-xl" />
+
+                    {preview ? (
+                      <img
+                        src={preview}
+                        alt={displayName}
+                        className="relative h-32 w-32 rounded-[28px] border border-white/10 object-cover shadow-2xl sm:h-36 sm:w-36"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="relative flex h-32 w-32 items-center justify-center rounded-[28px] border border-violet-400/20 bg-gradient-to-br from-violet-600/20 to-fuchsia-600/10 text-5xl font-black text-violet-200 sm:h-36 sm:w-36">
+                        {displayName?.charAt(0)?.toUpperCase() || "U"}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111118] text-violet-300 shadow-2xl transition-all duration-300 hover:border-violet-400/30 hover:bg-violet-500/10 hover:text-white"
+                      title="Change profile picture"
+                    >
+                      <FiCamera size={16} />
+                    </button>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageChange}
                     />
-                  ) : (
-                    <div className="flex h-32 w-32 items-center justify-center rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-600/30 to-fuchsia-600/20 text-4xl font-black text-violet-200">
-                      {displayName?.charAt(0)?.toUpperCase() || "U"}
+                  </div>
+
+                  {/* DETAILS */}
+
+                  <div className="min-w-0 flex-1 text-center sm:text-left">
+                    <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                      {form.targetRole && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/20 bg-violet-500/[0.08] px-3 py-1.5 text-[10px] font-semibold text-violet-300">
+                          <FiBriefcase size={11} />
+                          {form.targetRole}
+                        </span>
+                      )}
+
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/[0.05] px-3 py-1.5 text-[10px] font-semibold text-emerald-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-lg shadow-emerald-500/50" />
+                        Active
+                      </span>
                     </div>
-                  )}
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-xl border border-violet-400/30 bg-[#101018] text-violet-300 shadow-lg transition hover:bg-violet-500/20"
-                  >
-                    <FiCamera size={17} />
-                  </button>
+                    <h2 className="mt-4 break-words text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+                      {displayName}
+                    </h2>
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleImageChange}
-                  />
-                </div>
+                    <p className="mt-2 text-xs text-slate-600">
+                      @{username || "username"} ·{" "}
+                      {email || "email not available"}
+                    </p>
 
-                {/* BASIC INFORMATION */}
-
-                <div className="text-center sm:text-left">
-                  <p className="text-xs uppercase tracking-[0.2em] text-violet-400">
-                    Developer Profile
-                  </p>
-
-                  <h2 className="mt-2 text-3xl font-black">{displayName}</h2>
-
-                  <p className="mt-1 text-sm text-slate-500">@{username}</p>
-
-                  <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-slate-400">
-                      <FiUser className="mr-1 inline" />
-                      Developer
-                    </span>
-
-                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/5 px-3 py-1 text-xs text-emerald-400">
-                      Profile active
-                    </span>
+                    <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-slate-500 sm:mx-0">
+                      Build a stronger professional profile so your AI career
+                      engine can better understand your experience, skills and
+                      developer presence.
+                    </p>
                   </div>
                 </div>
               </div>
             </section>
 
             {/* ==================================================
-                ACCOUNT INFORMATION
+                ACCOUNT
             ================================================== */}
 
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-              <SectionTitle
-                icon={FiUser}
-                title="Account information"
-                description="Your identity information from authentication."
-              />
+            <ProfileCard
+              icon={FiShield}
+              eyebrow="IDENTITY"
+              title="Account information"
+              description="Managed by your authentication account."
+            >
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <ModernInput
+                  icon={FiUser}
+                  label="Username"
+                  value={username}
+                  disabled
+                />
 
-              <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
-                <Input label="Username" value={username} disabled />
-
-                <Input label="Email" value={email} disabled />
+                <ModernInput
+                  icon={FiMail}
+                  label="Email"
+                  value={email}
+                  disabled
+                />
               </div>
-
-              <p className="mt-4 text-xs text-slate-600">
-                Username and email cannot be changed from the profile page.
-              </p>
-            </section>
+            </ProfileCard>
 
             {/* ==================================================
-                PERSONAL INFORMATION
+                PERSONAL
             ================================================== */}
 
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-              <SectionTitle
-                icon={FiUser}
-                title="Personal information"
-                description="Tell the AI interviewer more about you."
-              />
-
-              <div className="mt-6 space-y-5">
-                <Input
+            <ProfileCard
+              icon={FiUser}
+              eyebrow="PERSONAL"
+              title="Personal information"
+              description="Information used to personalize your AI career experience."
+            >
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <ModernInput
+                  icon={FiUser}
                   label="Full name"
                   name="name"
                   value={form.name}
                   onChange={handleChange}
-                  placeholder="Enter your full name"
+                  placeholder="Your full name"
                 />
+
+                <div>
+                  <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
+                    Target role
+                  </label>
+
+                  <div className="min-h-[49px] rounded-xl border border-white/[0.08] bg-black/20 transition-all duration-300 focus-within:border-violet-500/30 focus-within:bg-violet-500/[0.02]">
+                    {form.targetRole ? (
+                      <div className="flex min-h-[49px] items-center px-3">
+                        <span className="inline-flex items-center gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.07] px-3 py-2 text-xs font-medium text-violet-300">
+                          <FiBriefcase size={13} />
+
+                          {form.targetRole}
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setForm((previous) => ({
+                                ...previous,
+                                targetRole: "",
+                              }))
+                            }
+                            className="ml-1 text-slate-600 transition hover:text-red-400"
+                          >
+                            <FiX size={13} />
+                          </button>
+                        </span>
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        value=""
+                        onChange={(event) =>
+                          setForm((previous) => ({
+                            ...previous,
+                            targetRole: event.target.value,
+                          }))
+                        }
+                        placeholder="e.g. Full Stack Developer"
+                        className="w-full bg-transparent px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700"
+                      />
+                    )}
+                  </div>
+
+                  <p className="mt-2 text-[10px] text-slate-700">
+                    Only one target role can be selected.
+                  </p>
+                </div>
               </div>
-            </section>
+            </ProfileCard>
 
             {/* ==================================================
                 DEVELOPER PRESENCE
             ================================================== */}
 
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-              <SectionTitle
-                icon={FiExternalLink}
-                title="Developer presence"
-                description="Connect your public developer profiles."
-              />
-
-              <div className="mt-6 space-y-5">
-                <SocialInput
+            <ProfileCard
+              icon={FiLink}
+              eyebrow="DEVELOPER GRAPH"
+              title="Developer presence"
+              description="Connect public profiles to give the AI more evidence about your work."
+            >
+              <div className="space-y-4">
+                <ModernSocialInput
                   icon={FiGithub}
                   label="GitHub"
                   name="github"
@@ -691,7 +907,7 @@ const Profile = () => {
                   placeholder="https://github.com/username"
                 />
 
-                <SocialInput
+                <ModernSocialInput
                   icon={FiLinkedin}
                   label="LinkedIn"
                   name="linkedin"
@@ -700,7 +916,7 @@ const Profile = () => {
                   placeholder="https://linkedin.com/in/username"
                 />
 
-                <SocialInput
+                <ModernSocialInput
                   icon={FiCode}
                   label="LeetCode"
                   name="leetcode"
@@ -709,168 +925,199 @@ const Profile = () => {
                   placeholder="https://leetcode.com/username"
                 />
               </div>
-            </section>
+            </ProfileCard>
 
             {/* ==================================================
                 SKILLS
             ================================================== */}
 
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-              <SectionTitle
-                icon={FiCode}
-                title="Skills"
-                description="Add skills you want the AI interviewer to assess."
-              />
+            <ProfileCard
+              icon={FiCode}
+              eyebrow="CAPABILITIES"
+              title="Skills"
+              description="Your manually provided skills are combined with evidence detected from GitHub."
+            >
+              {/* TECHNICAL */}
 
-              <div className="mt-6 space-y-8">
-                {/* ==================================================
-                    TECHNICAL SKILLS
-                ================================================== */}
+              <div>
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+                  <div>
+                    <h3 className="text-sm font-bold text-white">
+                      Technical skills
+                    </h3>
 
-                <div>
-                  <p className="mb-3 text-xs font-medium text-slate-400">
-                    Technical skills
-                  </p>
-
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={technicalSkillInput}
-                      onChange={(event) =>
-                        setTechnicalSkillInput(event.target.value)
-                      }
-                      onKeyDown={handleTechnicalSkillKeyDown}
-                      placeholder="e.g. React, Node.js, MongoDB"
-                      className="flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-violet-500/50"
-                    />
-
-                    <button
-                      type="button"
-                      onClick={addTechnicalSkill}
-                      className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold transition hover:bg-violet-500"
-                    >
-                      <FiPlus size={16} />
-                      Add
-                    </button>
+                    <p className="mt-1 text-[11px] text-slate-600">
+                      Manual + GitHub evidence
+                    </p>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {form.technicalSkills.length > 0 ? (
-                      form.technicalSkills.map((skill, index) => {
-                        const name =
-                          typeof skill === "string" ? skill : skill?.name;
-
-                        if (!name) {
-                          return null;
-                        }
-
-                        return (
-                          <SkillTag
-                            key={`${name}-${index}`}
-                            name={name}
-                            level={skill?.level}
-                            onRemove={() => removeTechnicalSkill(index)}
-                          />
-                        );
-                      })
-                    ) : (
-                      <p className="text-xs text-slate-600">
-                        No technical skills added yet.
-                      </p>
-                    )}
-                  </div>
+                  {githubAnalyzed && (
+                    <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/[0.05] px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-emerald-400">
+                      <FiCheckCircle size={11} />
+                      GitHub analyzed
+                    </span>
+                  )}
                 </div>
 
-                {/* ==================================================
-                    SOCIAL SKILLS
-                ================================================== */}
+                <div className="mt-4 flex gap-2">
+                  <input
+                    type="text"
+                    value={technicalSkillInput}
+                    onChange={(event) =>
+                      setTechnicalSkillInput(event.target.value)
+                    }
+                    onKeyDown={handleTechnicalSkillKeyDown}
+                    placeholder="Add technical skill..."
+                    className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-white outline-none transition-all duration-300 placeholder:text-slate-700 focus:border-violet-500/30 focus:bg-violet-500/[0.02]"
+                  />
 
-                <div>
-                  <p className="mb-3 text-xs font-medium text-slate-400">
-                    Social skills
-                  </p>
+                  <button
+                    type="button"
+                    onClick={addTechnicalSkill}
+                    className="flex shrink-0 items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-bold transition-all duration-300 hover:bg-violet-500 hover:shadow-lg hover:shadow-violet-900/20"
+                  >
+                    <FiPlus size={15} />
+                    <span className="hidden sm:inline">Add</span>
+                  </button>
+                </div>
 
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={socialSkillInput}
-                      onChange={(event) =>
-                        setSocialSkillInput(event.target.value)
-                      }
-                      onKeyDown={handleSocialSkillKeyDown}
-                      placeholder="e.g. Communication, Leadership"
-                      className="flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-violet-500/50"
-                    />
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {mergedTechnicalSkills.length > 0 ? (
+                    mergedTechnicalSkills.map((skill, index) => (
+                      <TechnicalSkillTag
+                        key={`${skill.name}-${index}`}
+                        name={skill.name}
+                        level={skill.level}
+                        githubDetected={skill.githubDetected}
+                        onRemove={() => removeTechnicalSkill(skill.name)}
+                      />
+                    ))
+                  ) : (
+                    <EmptyState text="No technical skills yet." />
+                  )}
+                </div>
 
-                    <button
-                      type="button"
-                      onClick={addSocialSkill}
-                      className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold transition hover:bg-violet-500"
-                    >
-                      <FiPlus size={16} />
-                      Add
-                    </button>
-                  </div>
+                {githubAnalyzed && (
+                  <div className="mt-5 flex items-center gap-3 rounded-xl border border-emerald-500/10 bg-emerald-500/[0.025] p-4">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+                      <FiGithub size={16} />
+                    </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {form.socialSkills.length > 0 ? (
-                      form.socialSkills.map((skill, index) => {
-                        const name =
-                          typeof skill === "string" ? skill : skill?.name;
-
-                        if (!name) {
-                          return null;
-                        }
-
-                        return (
-                          <SkillTag
-                            key={`${name}-${index}`}
-                            name={name}
-                            level={skill?.level}
-                            onRemove={() => removeSocialSkill(index)}
-                          />
-                        );
-                      })
-                    ) : (
-                      <p className="text-xs text-slate-600">
-                        No social skills added yet.
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-emerald-300">
+                        GitHub evidence found
                       </p>
-                    )}
+
+                      <p className="mt-1 text-[10px] leading-5 text-slate-600">
+                        {githubSkills.length} skill
+                        {githubSkills.length !== 1 ? "s" : ""} detected across{" "}
+                        {githubRepositories} analyzed
+                        {githubRepositories !== 1
+                          ? " repositories"
+                          : " repository"}
+                        .
+                      </p>
+                    </div>
                   </div>
+                )}
+              </div>
+
+              {/* DIVIDER */}
+
+              <div className="my-8 h-px bg-white/[0.05]" />
+
+              {/* SOCIAL */}
+
+              <div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    Social skills
+                  </h3>
+
+                  <p className="mt-1 text-[11px] text-slate-600">
+                    Communication and workplace strengths you want the AI to
+                    consider.
+                  </p>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <input
+                    type="text"
+                    value={socialSkillInput}
+                    onChange={(event) =>
+                      setSocialSkillInput(event.target.value)
+                    }
+                    onKeyDown={handleSocialSkillKeyDown}
+                    placeholder="Add social skill..."
+                    className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-white outline-none transition-all duration-300 placeholder:text-slate-700 focus:border-violet-500/30"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={addSocialSkill}
+                    className="flex shrink-0 items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-bold transition-all duration-300 hover:bg-violet-500"
+                  >
+                    <FiPlus size={15} />
+                    <span className="hidden sm:inline">Add</span>
+                  </button>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {form.socialSkills.length > 0 ? (
+                    form.socialSkills.map((skill, index) => {
+                      const name = normalizeSkillName(skill);
+
+                      if (!name) return null;
+
+                      return (
+                        <SkillTag
+                          key={`${name}-${index}`}
+                          name={name}
+                          level={skill?.level}
+                          onRemove={() => removeSocialSkill(index)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <EmptyState text="No social skills yet." />
+                  )}
                 </div>
               </div>
-            </section>
+            </ProfileCard>
 
             {/* ==================================================
                 RESUME
             ================================================== */}
 
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-              <SectionTitle
-                icon={FiFileText}
-                title="Resume"
-                description="Your resume will help the AI personalize interviews."
-              />
+            <ProfileCard
+              icon={FiFileText}
+              eyebrow="DOCUMENT"
+              title="Resume"
+              description="Your resume gives the AI additional evidence about your experience."
+            >
+              <div className="group relative overflow-hidden rounded-2xl border border-dashed border-white/[0.1] bg-black/20 p-7 text-center transition-all duration-300 hover:border-violet-500/20 hover:bg-violet-500/[0.015]">
+                <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-violet-500/20 to-transparent opacity-0 transition group-hover:opacity-100" />
 
-              <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-black/20 p-8 text-center">
-                <FiFileText className="mx-auto text-slate-600" size={30} />
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-500/15 bg-violet-500/[0.06] text-violet-400 transition-transform duration-300 group-hover:scale-105">
+                  <FiFileText size={23} />
+                </div>
 
-                <p className="mt-3 text-sm font-medium">
+                <p className="mt-4 text-sm font-bold text-white">
                   {resumeFile
                     ? resumeFile.name
                     : profile?.resume
                       ? "Resume uploaded"
-                      : "Resume upload"}
+                      : "No resume uploaded"}
                 </p>
 
-                <p className="mt-1 text-xs text-slate-600">
-                  PDF files are recommended. Maximum size: 10MB.
+                <p className="mt-1 text-[10px] text-slate-700">
+                  PDF · Maximum 10MB
                 </p>
 
                 <button
                   type="button"
                   onClick={() => resumeInputRef.current?.click()}
-                  className="mt-4 inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-2.5 text-xs font-semibold text-slate-400 transition-all duration-300 hover:border-violet-500/20 hover:bg-violet-500/[0.06] hover:text-white"
                 >
                   <FiUpload size={14} />
 
@@ -885,77 +1132,235 @@ const Profile = () => {
                   onChange={handleResumeChange}
                 />
 
-                {/* New resume selected */}
                 {resumeFile && (
-                  <p className="mt-3 text-xs text-emerald-400">
-                    New resume selected. Click "Save profile" to upload it.
+                  <p className="mt-3 text-[10px] font-medium text-emerald-400">
+                    New resume selected · Save to upload
                   </p>
                 )}
 
-                {/* Existing saved resume */}
                 {profile?.resume && (
                   <a
                     href={profile.resume}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-3 block text-xs text-violet-400 hover:text-violet-300"
+                    className="mt-4 inline-flex items-center gap-1.5 text-[10px] font-semibold text-violet-400 transition hover:text-violet-300"
                   >
                     View current resume
+                    <FiExternalLink size={11} />
                   </a>
                 )}
               </div>
-            </section>
+            </ProfileCard>
 
-            {/* ==================================================
-                MESSAGE
-            ================================================== */}
+            {/* MESSAGE */}
 
             {message && (
-              <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 px-4 py-3 text-sm text-violet-300">
+              <div
+                className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-xs ${
+                  messageType === "error"
+                    ? "border-red-500/15 bg-red-500/[0.04] text-red-300"
+                    : messageType === "success"
+                      ? "border-emerald-500/15 bg-emerald-500/[0.04] text-emerald-300"
+                      : "border-violet-500/15 bg-violet-500/[0.04] text-violet-300"
+                }`}
+              >
+                {messageType === "success" ? (
+                  <FiCheckCircle size={14} />
+                ) : (
+                  <FiStar size={14} />
+                )}
+
                 {message}
               </div>
             )}
 
-            {/* ==================================================
-                SAVE
-            ================================================== */}
+            {/* BOTTOM SAVE */}
 
-            <div className="flex justify-end pb-10">
+            <div className="flex justify-end border-t border-white/[0.05] pb-10 pt-6">
               <button
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 text-sm font-bold transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="group flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 text-xs font-bold shadow-xl shadow-violet-950/20 transition-all duration-300 hover:bg-violet-500 hover:shadow-violet-900/30 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <FiSave size={16} />
+                <FiSave size={14} />
 
-                {saving ? "Saving..." : "Save profile"}
+                {saving ? "Saving profile..." : "Save profile"}
+
+                {!saving && (
+                  <FiChevronRight
+                    size={14}
+                    className="transition-transform group-hover:translate-x-0.5"
+                  />
+                )}
               </button>
             </div>
           </div>
-        )}
+
+          {/* ====================================================
+              RIGHT SIDEBAR
+          ==================================================== */}
+
+          <aside className="space-y-5 lg:sticky lg:top-[96px] lg:self-start">
+            {/* COMPLETION */}
+
+            <div className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-white/[0.025] p-5">
+              <div className="absolute right-[-60px] top-[-60px] h-40 w-40 rounded-full bg-violet-600/10 blur-[60px]" />
+
+              <div className="relative">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-violet-400">
+                      Profile health
+                    </p>
+
+                    <h3 className="mt-1 text-sm font-bold text-white">
+                      Completion
+                    </h3>
+                  </div>
+
+                  <span className="text-2xl font-black tracking-tight text-violet-300">
+                    {profileCompletion}%
+                  </span>
+                </div>
+
+                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-400 transition-all duration-700"
+                    style={{
+                      width: `${Math.min(profileCompletion, 100)}%`,
+                    }}
+                  />
+                </div>
+
+                <p className="mt-3 text-[10px] leading-5 text-slate-600">
+                  Complete more of your profile to give the AI stronger career
+                  context.
+                </p>
+              </div>
+            </div>
+
+            {/* AI CARD */}
+
+            <div className="relative overflow-hidden rounded-[24px] border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.08] to-fuchsia-500/[0.025] p-5">
+              <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-violet-500/10 blur-[50px]" />
+
+              <div className="relative">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/10 text-violet-300">
+                  <FiStar size={16} />
+                </div>
+
+                <h3 className="mt-4 text-sm font-bold text-white">
+                  AI career intelligence
+                </h3>
+
+                <p className="mt-2 text-[10px] leading-5 text-slate-600">
+                  Your profile can become evidence for adaptive interviews,
+                  skill analysis, resume intelligence and career
+                  recommendations.
+                </p>
+
+                <div className="mt-4 space-y-2">
+                  <MiniStatus
+                    label="Identity"
+                    active={Boolean(username && email)}
+                  />
+
+                  <MiniStatus
+                    label="Target role"
+                    active={Boolean(form.targetRole)}
+                  />
+
+                  <MiniStatus
+                    label="Technical skills"
+                    active={mergedTechnicalSkills.length > 0}
+                  />
+
+                  <MiniStatus
+                    label="Developer evidence"
+                    active={
+                      githubAnalyzed ||
+                      Boolean(form.github || form.linkedin || form.leetcode)
+                    }
+                  />
+
+                  <MiniStatus
+                    label="Resume"
+                    active={Boolean(resumeFile || profile?.resume)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* PRIVACY */}
+
+            <div className="rounded-[24px] border border-white/[0.07] bg-white/[0.02] p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.04] text-slate-500">
+                  <FiShield size={15} />
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-bold text-slate-300">
+                    Your identity stays yours
+                  </h3>
+
+                  <p className="mt-1 text-[10px] leading-5 text-slate-700">
+                    Username and email are controlled by your authentication
+                    account and cannot be edited here.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
       </main>
     </div>
   );
 };
 
 // ============================================================
-// SECTION TITLE
+// PROFILE CARD
 // ============================================================
 
-const SectionTitle = ({ icon: Icon, title, description }) => {
+const ProfileCard = ({
+  icon: Icon,
+  eyebrow,
+  title,
+  description,
+  children,
+}) => {
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/20 bg-violet-500/10 text-violet-400">
-        <Icon size={18} />
+    <section className="relative overflow-hidden rounded-[26px] border border-white/[0.08] bg-white/[0.025] p-5 shadow-xl shadow-black/10 sm:p-6">
+
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+
+      <div className="flex items-start gap-3">
+
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/15 bg-violet-500/[0.06] text-violet-400">
+          <Icon size={17} />
+        </div>
+
+        <div className="min-w-0">
+
+          <p className="text-[9px] font-bold tracking-[0.22em] text-violet-400">
+            {eyebrow}
+          </p>
+
+          <h2 className="mt-1 text-sm font-bold text-white">
+            {title}
+          </h2>
+
+          <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-600">
+            {description}
+          </p>
+        </div>
       </div>
 
-      <div>
-        <h2 className="text-sm font-bold">{title}</h2>
-
-        <p className="mt-1 text-xs text-slate-600">{description}</p>
+      <div className="mt-6">
+        {children}
       </div>
-    </div>
+    </section>
   );
 };
 
@@ -963,7 +1368,8 @@ const SectionTitle = ({ icon: Icon, title, description }) => {
 // INPUT
 // ============================================================
 
-const Input = ({
+const ModernInput = ({
+  icon: Icon,
   label,
   name,
   value,
@@ -973,18 +1379,23 @@ const Input = ({
 }) => {
   return (
     <div>
-      <label className="mb-2 block text-xs font-medium text-slate-400">
+
+      <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
         {label}
       </label>
 
       <div
-        className={`flex items-center rounded-xl border border-white/10 bg-black/20 ${
-          disabled ? "opacity-60" : ""
+        className={`group flex items-center rounded-xl border bg-black/20 transition-all duration-300 ${
+          disabled
+            ? "border-white/[0.06] opacity-60"
+            : "border-white/[0.08] focus-within:border-violet-500/30 focus-within:bg-violet-500/[0.02]"
         }`}
       >
-        {label === "Email" && (
-          <FiMail className="ml-4 shrink-0 text-slate-600" size={15} />
-        )}
+
+        <Icon
+          size={15}
+          className="ml-4 shrink-0 text-slate-700 transition group-focus-within:text-violet-400"
+        />
 
         <input
           type="text"
@@ -993,7 +1404,7 @@ const Input = ({
           onChange={onChange}
           disabled={disabled}
           placeholder={placeholder}
-          className="w-full bg-transparent px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 disabled:cursor-not-allowed"
+          className="w-full bg-transparent px-3 py-3 text-sm text-white outline-none placeholder:text-slate-700 disabled:cursor-not-allowed"
         />
       </div>
     </div>
@@ -1004,7 +1415,7 @@ const Input = ({
 // SOCIAL INPUT
 // ============================================================
 
-const SocialInput = ({
+const ModernSocialInput = ({
   icon: Icon,
   label,
   name,
@@ -1014,52 +1425,166 @@ const SocialInput = ({
 }) => {
   return (
     <div>
-      <label className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-400">
-        <Icon size={14} />
 
+      <label className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
+        <Icon size={13} />
         {label}
       </label>
 
-      <input
-        type="url"
-        name={name}
-        value={value || ""}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-violet-500/50"
-      />
+      <div className="group flex items-center rounded-xl border border-white/[0.08] bg-black/20 transition-all duration-300 focus-within:border-violet-500/30 focus-within:bg-violet-500/[0.02]">
+
+        <div className="ml-4 flex h-7 w-7 items-center justify-center rounded-lg bg-white/[0.03] text-slate-700 transition group-focus-within:text-violet-400">
+          <FiExternalLink size={13} />
+        </div>
+
+        <input
+          type="url"
+          name={name}
+          value={value || ""}
+          onChange={onChange}
+          placeholder={placeholder}
+          className="w-full bg-transparent px-3 py-3 text-sm text-white outline-none placeholder:text-slate-700"
+        />
+      </div>
     </div>
   );
 };
 
 // ============================================================
-// SKILL TAG
+// TECHNICAL TAG
 // ============================================================
 
-const SkillTag = ({ name, level, onRemove }) => {
+const TechnicalSkillTag = ({
+  name,
+  level,
+  githubDetected,
+  onRemove,
+}) => {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/5 px-3 py-1.5 text-xs text-violet-300">
-      <span>{name}</span>
+    <span
+      className={`group inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] transition-all duration-300 ${
+        githubDetected
+          ? "border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-300 hover:border-emerald-500/25"
+          : "border-violet-500/15 bg-violet-500/[0.05] text-violet-300 hover:border-violet-500/25"
+      }`}
+    >
 
-      {/* Show existing level if backend already has one */}
-      {level && <span className="text-slate-500">• {level}</span>}
+      <span
+        className={`flex h-5 w-5 items-center justify-center rounded-md ${
+          githubDetected
+            ? "bg-emerald-500/10"
+            : "bg-violet-500/10"
+        }`}
+      >
+        {githubDetected ? (
+          <FiGithub size={11} />
+        ) : (
+          <FiCode size={11} />
+        )}
+      </span>
+
+      <span className="font-semibold">
+        {name}
+      </span>
+
+      {level && (
+        <span className="text-slate-600">
+          · {level}
+        </span>
+      )}
+
+      {githubDetected ? (
+        <span className="ml-1 flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider text-emerald-500">
+          <FiShield size={9} />
+          Verified
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-1 rounded-md p-0.5 text-slate-700 transition hover:bg-red-500/10 hover:text-red-400"
+          title={`Remove ${name}`}
+        >
+          <FiX size={12} />
+        </button>
+      )}
+    </span>
+  );
+};
+
+// ============================================================
+// SOCIAL TAG
+// ============================================================
+
+const SkillTag = ({
+  name,
+  level,
+  onRemove,
+}) => {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-xl border border-violet-500/15 bg-violet-500/[0.05] px-3 py-2 text-[11px] text-violet-300">
+
+      <span className="font-semibold">
+        {name}
+      </span>
+
+      {level && (
+        <span className="text-slate-600">
+          · {level}
+        </span>
+      )}
 
       <button
         type="button"
         onClick={onRemove}
-        className="ml-1 rounded-full text-slate-500 transition hover:text-red-400"
-        title={`Remove ${name}`}
+        className="ml-1 rounded-md p-0.5 text-slate-700 transition hover:bg-red-500/10 hover:text-red-400"
       >
-        <FiX size={13} />
+        <FiX size={12} />
       </button>
     </span>
   );
 };
 
 // ============================================================
-// EXPORTS
+// EMPTY
 // ============================================================
 
-export { Profile };
+const EmptyState = ({ text }) => {
+  return (
+    <div className="w-full rounded-xl border border-dashed border-white/[0.08] bg-black/10 px-4 py-4 text-center text-[10px] text-slate-700">
+      {text}
+    </div>
+  );
+};
 
+// ============================================================
+// SIDEBAR STATUS
+// ============================================================
+
+const MiniStatus = ({ label, active }) => {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-white/[0.04] bg-black/10 px-3 py-2">
+
+      <span className="text-[10px] text-slate-600">
+        {label}
+      </span>
+
+      <span
+        className={`flex h-4 w-4 items-center justify-center rounded-full ${
+          active
+            ? "bg-emerald-500/10 text-emerald-400"
+            : "bg-white/[0.03] text-slate-700"
+        }`}
+      >
+        {active ? (
+          <FiCheckCircle size={10} />
+        ) : (
+          <span className="h-1 w-1 rounded-full bg-current" />
+        )}
+      </span>
+    </div>
+  );
+};
+
+export { Profile };
 export default Profile;

@@ -1,3 +1,4 @@
+
 import axios from "axios";
 
 const API_URL = "http://localhost:3000/api";
@@ -18,14 +19,16 @@ profileApi.interceptors.request.use(
       sessionStorage.getItem("accessToken");
 
     if (token) {
+      config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
     }
 
     return config;
   },
+
   (error) => {
     return Promise.reject(error);
-  },
+  }
 );
 
 // ============================================================
@@ -41,28 +44,41 @@ profileApi.interceptors.response.use(
   (error) => {
     const status = error?.response?.status;
 
-    // Access token expired / invalid
     if (status === 401) {
-      console.warn("Access token expired or invalid. Logging out...");
+      console.warn(
+        "Access token expired or invalid. Logging out..."
+      );
 
-      // Remove stored tokens
+      // ------------------------------------------------------
+      // REMOVE ACCESS TOKENS
+      // ------------------------------------------------------
+
       localStorage.removeItem("accessToken");
       sessionStorage.removeItem("accessToken");
 
-      // Optional: remove other auth-related data
+      // ------------------------------------------------------
+      // REMOVE STORED USER DATA
+      // ------------------------------------------------------
+
       localStorage.removeItem("user");
       sessionStorage.removeItem("user");
 
-      // Redirect to landing/login page
-      window.location.href = "/login";
+      // ------------------------------------------------------
+      // REDIRECT ONLY IF NOT ALREADY ON LOGIN
+      // ------------------------------------------------------
+
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
 
     return Promise.reject(error);
-  },
+  }
 );
 
 // ============================================================
-// GET PROFILE
+// GET MY PROFILE
+// GET /api/profile
 // ============================================================
 
 export const getMyProfile = async () => {
@@ -73,10 +89,14 @@ export const getMyProfile = async () => {
 
 // ============================================================
 // UPDATE PROFILE
+// PUT /api/profile
 // ============================================================
 
 export const updateProfile = async (formData) => {
-  const response = await profileApi.put("/profile", formData);
+  const response = await profileApi.put(
+    "/profile",
+    formData
+  );
 
   return response.data;
 };

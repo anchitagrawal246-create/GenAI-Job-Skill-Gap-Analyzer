@@ -24,12 +24,12 @@ import {
   FiRefreshCw,
   FiMenu,
   FiX,
-  FiLogOut,
   FiCheck,
   FiZap,
   FiTrendingUp,
   FiLayers,
   FiShield,
+  FiLogOut,
 } from "react-icons/fi";
 
 import { getInterviews, createInterview } from "../../api/interview.api";
@@ -59,40 +59,72 @@ const getStoredUser = () => {
   try {
     const raw = localStorage.getItem("user") || sessionStorage.getItem("user");
 
-    if (!raw) {
-      return null;
-    }
+    if (!raw) return null;
 
     return JSON.parse(raw);
   } catch (error) {
-    console.error("[DASHBOARD] Failed to parse stored user:", error);
-
+    console.error("[DASHBOARD] Invalid stored user:", error);
     return null;
   }
 };
 
 // ============================================================
-// STRING HELPERS
+// GENERAL HELPERS
 // ============================================================
 
 const cleanString = (value) => {
-  if (typeof value !== "string") {
-    return "";
-  }
+  if (typeof value !== "string") return "";
 
   return value.trim();
 };
 
-const uniqueStrings = (value) => {
-  if (!Array.isArray(value)) {
+const hasValue = (value) => {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  if (typeof value === "object") {
+    return Object.keys(value).length > 0;
+  }
+
+  return Boolean(value);
+};
+
+const uniqueStrings = (values) => {
+  if (!Array.isArray(values)) {
     return [];
   }
 
   const seen = new Set();
 
-  return value
-    .filter((item) => typeof item === "string" && item.trim().length > 0)
-    .map((item) => item.trim())
+  return values
+    .map((item) => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+
+      if (item && typeof item === "object") {
+        return cleanString(
+          item.name ||
+            item.skill ||
+            item.title ||
+            item.label ||
+            item.technology ||
+            item.value,
+        );
+      }
+
+      return "";
+    })
+    .filter(Boolean)
     .filter((item) => {
       const key = item.toLowerCase();
 
@@ -101,150 +133,108 @@ const uniqueStrings = (value) => {
       }
 
       seen.add(key);
+
       return true;
     })
-    .slice(0, 30);
+    .slice(0, 100);
+};
+
+const clamp = (value, min, max) => {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, number));
 };
 
 // ============================================================
-// PROFILE EXTRACTION
+// PROFILE RESPONSE NORMALIZATION
 // ============================================================
 
-const getProfileData = (response) => {
+/*
+  getMyProfile() already returns response.data.
+
+  The dashboard therefore needs to support common backend shapes:
+
+  1. profile object
+  2. { profile: {...} }
+  3. { data: {...} }
+  4. { data: { profile: {...} } }
+*/
+
+const unwrapProfileResponse = (response) => {
   if (!response) {
     return null;
   }
 
-  const data = response?.data ?? response;
+  let data = response;
 
-  const candidates = [
-    data?.profile,
-    data?.data?.profile,
-    data?.data,
-    response?.profile,
-    response,
-  ];
-
-  return (
-    candidates.find(
-      (item) => item && typeof item === "object" && !Array.isArray(item),
-    ) || null
-  );
-};
-
-const getProfileRole = (profile, user) => {
-  const roleCandidates = [
-    profile?.targetRole,
-    profile?.preferredRole,
-    profile?.jobRole,
-    profile?.careerGoal,
-    profile?.desiredRole,
-    profile?.role,
-
-    profile?.basicInfo?.targetRole,
-    profile?.basicInfo?.preferredRole,
-    profile?.basicInfo?.jobRole,
-
-    profile?.user?.targetRole,
-    profile?.user?.preferredRole,
-    profile?.user?.jobRole,
-    profile?.user?.role,
-
-    user?.targetRole,
-    user?.preferredRole,
-    user?.jobRole,
-    user?.careerGoal,
-    user?.role,
-  ];
-
-  const role = roleCandidates.find(
-    (value) => typeof value === "string" && value.trim(),
-  );
-
-  return role?.trim() || "";
-};
-
-const getTechnicalSkills = (profile, user) => {
-  const candidates = [
-    profile?.technicalSkills,
-    profile?.technical?.skills,
-    profile?.manualSkills,
-    profile?.skills,
-
-    profile?.technicalProfile?.skills,
-    profile?.technicalProfile?.technicalSkills,
-
-    profile?.user?.technicalSkills,
-    profile?.user?.skills,
-    profile?.user?.manualSkills,
-
-    user?.technicalSkills,
-    user?.skills,
-    user?.manualSkills,
-  ];
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-
-    const normalized = uniqueStrings(candidate);
-
-    if (normalized.length > 0) {
-      return normalized;
-    }
+  // Axios response protection.
+  if (data?.data !== undefined) {
+    data = data.data;
   }
 
-  return [];
-};
-
-const getSocialSkills = (profile, user) => {
-  const candidates = [
-    profile?.socialSkills,
-    profile?.softSkills,
-    profile?.communicationSkills,
-    profile?.social?.skills,
-
-    profile?.user?.socialSkills,
-
-    user?.socialSkills,
-    user?.softSkills,
-  ];
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-
-    const normalized = uniqueStrings(candidate);
-
-    if (normalized.length > 0) {
-      return normalized;
-    }
+  // { profile: {...} }
+  if (data?.profile && typeof data.profile === "object") {
+    return data.profile;
   }
 
-  return [];
+  // { data: { profile: {...} } }
+  if (data?.data && typeof data.data === "object" && data.data.profile) {
+    return data.data.profile;
+  }
+
+  // { data: {...} }
+  if (
+    data?.data &&
+    typeof data.data === "object" &&
+    !Array.isArray(data.data)
+  ) {
+    return data.data;
+  }
+
+  return data;
 };
 
-const getProfileField = (profile, user, keys) => {
-  for (const key of keys) {
-    const profileValue = profile?.[key];
+// ============================================================
+// GENERIC PROFILE FIELD READER
+// ============================================================
 
-    if (
-      profileValue !== undefined &&
-      profileValue !== null &&
-      String(profileValue).trim()
-    ) {
+const getNestedValue = (object, path) => {
+  if (!object || !path) {
+    return undefined;
+  }
+
+  const parts = path.split(".");
+
+  let current = object;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+
+    current = current[part];
+  }
+
+  return current;
+};
+
+const getProfileField = (profile, storedUser, paths = []) => {
+  for (const path of paths) {
+    const profileValue = getNestedValue(profile, path);
+
+    if (hasValue(profileValue)) {
       return profileValue;
     }
+  }
 
-    const userValue = user?.[key];
+  for (const path of paths) {
+    const userValue = getNestedValue(storedUser, path);
 
-    if (
-      userValue !== undefined &&
-      userValue !== null &&
-      String(userValue).trim()
-    ) {
+    if (hasValue(userValue)) {
       return userValue;
     }
   }
@@ -252,77 +242,342 @@ const getProfileField = (profile, user, keys) => {
   return null;
 };
 
-const getProfilePicture = (profile, user) => {
-  return (
-    getProfileField(profile, user, [
-      "profilePicture",
-      "profilePic",
-      "avatar",
-      "avatarUrl",
-      "profileImage",
-      "profileImageUrl",
-    ]) || null
-  );
+// ============================================================
+// PROFILE ROLE
+// ============================================================
+
+const getProfileRole = (profile, storedUser) => {
+  const role = getProfileField(profile, storedUser, [
+    "targetRole",
+    "preferredRole",
+    "jobRole",
+    "careerGoal",
+    "desiredRole",
+    "role",
+
+    "basicInfo.targetRole",
+    "basicInfo.preferredRole",
+    "basicInfo.jobRole",
+    "basicInfo.role",
+
+    "professional.targetRole",
+    "professional.preferredRole",
+    "professional.jobRole",
+
+    "user.targetRole",
+    "user.preferredRole",
+    "user.jobRole",
+    "user.role",
+  ]);
+
+  return typeof role === "string" ? role.trim() : "";
 };
 
-const getResume = (profile, user) => {
-  return getProfileField(profile, user, [
+// ============================================================
+// TECHNICAL SKILLS
+// ============================================================
+
+const getTechnicalSkills = (profile) => {
+  if (!profile) {
+    return [];
+  }
+
+  const candidates = [
+    profile.technicalSkills,
+
+    profile.technical?.skills,
+
+    profile.manualSkills,
+
+    profile.skills,
+
+    profile.technicalProfile?.skills,
+
+    profile.technicalProfile?.technicalSkills,
+
+    profile.skills?.technical,
+
+    profile.technical?.technicalSkills,
+
+    profile.basicInfo?.technicalSkills,
+  ];
+
+  for (const candidate of candidates) {
+    const skills = uniqueStrings(candidate);
+
+    if (skills.length > 0) {
+      return skills;
+    }
+  }
+
+  return [];
+};
+
+// ============================================================
+// SOCIAL / SOFT SKILLS
+// ============================================================
+
+const getSocialSkills = (profile) => {
+  if (!profile) {
+    return [];
+  }
+
+  const candidates = [
+    profile.socialSkills,
+
+    profile.softSkills,
+
+    profile.communicationSkills,
+
+    profile.social?.skills,
+
+    profile.social?.socialSkills,
+
+    profile.basicInfo?.socialSkills,
+  ];
+
+  for (const candidate of candidates) {
+    const skills = uniqueStrings(candidate);
+
+    if (skills.length > 0) {
+      return skills;
+    }
+  }
+
+  return [];
+};
+
+// ============================================================
+// PROFILE LINKS / FILES
+// ============================================================
+
+const getProfilePicture = (profile, storedUser) => {
+  return getProfileField(profile, storedUser, [
+    "profilePicture",
+    "profilePic",
+    "avatar",
+    "avatarUrl",
+    "profileImage",
+    "profileImageUrl",
+
+    "basicInfo.profilePicture",
+    "basicInfo.profilePic",
+    "basicInfo.avatar",
+    "basicInfo.avatarUrl",
+  ]);
+};
+
+const getResume = (profile, storedUser) => {
+  return getProfileField(profile, storedUser, [
     "resume",
     "resumeUrl",
     "resumeFile",
     "resumePath",
+
+    "documents.resume",
+    "basicInfo.resume",
   ]);
 };
 
-const getGithub = (profile, user) => {
-  return getProfileField(profile, user, [
+const getGithub = (profile, storedUser) => {
+  return getProfileField(profile, storedUser, [
     "github",
     "githubUrl",
     "githubProfile",
+    "githubURL",
+
+    "socialLinks.github",
+    "links.github",
+
+    "basicInfo.github",
+    "basicInfo.githubUrl",
   ]);
 };
 
-const getLinkedIn = (profile, user) => {
-  return getProfileField(profile, user, [
+const getLinkedIn = (profile, storedUser) => {
+  return getProfileField(profile, storedUser, [
     "linkedin",
     "linkedinUrl",
     "linkedIn",
     "linkedInUrl",
+    "linkedInURL",
+
+    "socialLinks.linkedin",
+    "socialLinks.linkedIn",
+
+    "links.linkedin",
+    "links.linkedIn",
+
+    "basicInfo.linkedin",
+    "basicInfo.linkedinUrl",
   ]);
 };
 
-const getLeetCode = (profile, user) => {
-  return getProfileField(profile, user, [
+const getLeetCode = (profile, storedUser) => {
+  return getProfileField(profile, storedUser, [
     "leetcode",
     "leetcodeUrl",
     "leetCode",
     "leetCodeUrl",
+    "leetCodeURL",
+
+    "socialLinks.leetcode",
+    "socialLinks.leetCode",
+
+    "links.leetcode",
+    "links.leetCode",
+
+    "basicInfo.leetcode",
+    "basicInfo.leetcodeUrl",
   ]);
 };
 
-const getDisplayName = (profile, user) => {
-  return (
-    getProfileField(profile, user, ["name", "fullName", "displayName"]) ||
-    getProfileField(profile?.basicInfo, user, ["name", "fullName"]) ||
-    getProfileField(profile?.user, user, ["name", "fullName"]) ||
-    "Candidate"
-  );
+// ============================================================
+// BASIC PROFILE DATA
+// ============================================================
+
+const getDisplayName = (profile, storedUser) => {
+  const name = getProfileField(profile, storedUser, [
+    "name",
+    "fullName",
+    "displayName",
+
+    "basicInfo.name",
+    "basicInfo.fullName",
+    "basicInfo.displayName",
+
+    "user.name",
+    "user.fullName",
+    "user.displayName",
+  ]);
+
+  if (typeof name === "string" && name.trim()) {
+    return name.trim();
+  }
+
+  return "Candidate";
 };
 
-const getUsername = (profile, user) => {
-  return (
-    getProfileField(profile, user, ["username", "userName"]) ||
-    getProfileField(profile?.user, user, ["username", "userName"]) ||
-    ""
-  );
+const getUsername = (profile, storedUser) => {
+  const username = getProfileField(profile, storedUser, [
+    "username",
+    "userName",
+
+    "basicInfo.username",
+    "basicInfo.userName",
+
+    "user.username",
+    "user.userName",
+  ]);
+
+  return typeof username === "string" ? username.trim() : "";
 };
 
-const getEmail = (profile, user) => {
-  return (
-    getProfileField(profile, user, ["email"]) ||
-    getProfileField(profile?.user, user, ["email"]) ||
-    ""
-  );
+const getEmail = (profile, storedUser) => {
+  const email = getProfileField(profile, storedUser, [
+    "email",
+
+    "basicInfo.email",
+
+    "user.email",
+  ]);
+
+  return typeof email === "string" ? email.trim() : "";
+};
+
+// ============================================================
+// PROFILE COMPLETION
+// ============================================================
+
+const calculateProfileCompletion = (
+  profile,
+  storedUser,
+  technicalSkills,
+  socialSkills,
+) => {
+  let score = 0;
+
+  const name = getDisplayName(profile, storedUser);
+
+  const username = getUsername(profile, storedUser);
+
+  const email = getEmail(profile, storedUser);
+
+  const resume = getResume(profile, storedUser);
+
+  const github = getGithub(profile, storedUser);
+
+  const linkedin = getLinkedIn(profile, storedUser);
+
+  const leetcode = getLeetCode(profile, storedUser);
+
+  const profilePicture = getProfilePicture(profile, storedUser);
+
+  // ----------------------------------------------------------
+  // BASIC PROFILE - 10%
+  // ----------------------------------------------------------
+
+  if (cleanString(name) && cleanString(username) && cleanString(email)) {
+    score += 10;
+  }
+
+  // ----------------------------------------------------------
+  // TECHNICAL SKILLS - 25%
+  // ----------------------------------------------------------
+
+  if (technicalSkills.length > 0) {
+    score += 25;
+  }
+
+  // ----------------------------------------------------------
+  // SOCIAL SKILLS - 15%
+  // ----------------------------------------------------------
+
+  if (socialSkills.length > 0) {
+    score += 15;
+  }
+
+  // ----------------------------------------------------------
+  // RESUME - 20%
+  // ----------------------------------------------------------
+
+  if (hasValue(resume)) {
+    score += 20;
+  }
+
+  // ----------------------------------------------------------
+  // GITHUB - 10%
+  // ----------------------------------------------------------
+
+  if (hasValue(github)) {
+    score += 10;
+  }
+
+  // ----------------------------------------------------------
+  // LINKEDIN - 10%
+  // ----------------------------------------------------------
+
+  if (hasValue(linkedin)) {
+    score += 10;
+  }
+
+  // ----------------------------------------------------------
+  // LEETCODE - 5%
+  // ----------------------------------------------------------
+
+  if (hasValue(leetcode)) {
+    score += 5;
+  }
+
+  // ----------------------------------------------------------
+  // PROFILE PICTURE - 5%
+  // ----------------------------------------------------------
+
+  if (hasValue(profilePicture)) {
+    score += 5;
+  }
+
+  return clamp(score, 0, 100);
 };
 
 // ============================================================
@@ -373,8 +628,12 @@ const getInterviewDate = (interview) => {
   });
 };
 
+const normalizeStatus = (status) => {
+  return String(status || "").toLowerCase();
+};
+
 const getStatusLabel = (status) => {
-  const normalized = String(status || "").toLowerCase();
+  const normalized = normalizeStatus(status);
 
   switch (normalized) {
     case "completed":
@@ -402,7 +661,7 @@ const getStatusLabel = (status) => {
 };
 
 const getStatusClass = (status) => {
-  const normalized = String(status || "").toLowerCase();
+  const normalized = normalizeStatus(status);
 
   if (normalized === "completed") {
     return "status-completed";
@@ -427,78 +686,60 @@ const getStatusClass = (status) => {
   return "status-default";
 };
 
-const clamp = (value, min, max) => {
-  const number = Number(value);
+// ============================================================
+// INTERVIEW RESPONSE NORMALIZATION
+// ============================================================
 
-  if (!Number.isFinite(number)) {
-    return min;
+const extractInterviewList = (response) => {
+  if (!response) {
+    return [];
   }
 
-  return Math.min(max, Math.max(min, number));
+  const data = response?.data ?? response;
+
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data?.data)) {
+    return data.data;
+  }
+
+  if (Array.isArray(data?.interviews)) {
+    return data.interviews;
+  }
+
+  if (Array.isArray(data?.results)) {
+    return data.results;
+  }
+
+  if (Array.isArray(data?.data?.interviews)) {
+    return data.data.interviews;
+  }
+
+  return [];
 };
 
-// ============================================================
-// PROFILE COMPLETION
-// ============================================================
-
-const calculateProfileCompletion = (profile, user) => {
-  let score = 0;
-
-  const name = getDisplayName(profile, user);
-  const username = getUsername(profile, user);
-  const email = getEmail(profile, user);
-
-  const technicalSkills = getTechnicalSkills(profile, user);
-
-  const socialSkills = getSocialSkills(profile, user);
-
-  const resume = getResume(profile, user);
-  const github = getGithub(profile, user);
-  const linkedin = getLinkedIn(profile, user);
-  const leetcode = getLeetCode(profile, user);
-  const profilePicture = getProfilePicture(profile, user);
-
-  // Basic profile = 10
-  if (cleanString(name) || cleanString(username) || cleanString(email)) {
-    score += 10;
+const extractCreatedInterview = (response) => {
+  if (!response) {
+    return null;
   }
 
-  // Technical = 25
-  if (technicalSkills.length > 0) {
-    score += 25;
+  const data = response?.data ?? response;
+
+  if (data?.interview) {
+    return data.interview;
   }
 
-  // Social = 15
-  if (socialSkills.length > 0) {
-    score += 15;
+  if (data?.data?.interview) {
+    return data.data.interview;
   }
 
-  // Resume = 20
-  if (resume) {
-    score += 20;
+  if (data?.data && typeof data.data === "object") {
+    return data.data;
   }
 
-  // GitHub = 10
-  if (github) {
-    score += 10;
-  }
-
-  // LinkedIn = 10
-  if (linkedin) {
-    score += 10;
-  }
-
-  // LeetCode = 5
-  if (leetcode) {
-    score += 5;
-  }
-
-  // Profile picture = 5
-  if (profilePicture) {
-    score += 5;
-  }
-
-  return Math.min(score, 100);
+  return data;
 };
 
 // ============================================================
@@ -508,11 +749,18 @@ const calculateProfileCompletion = (profile, user) => {
 const Dashboard = () => {
   const navigate = useNavigate();
 
+  // ----------------------------------------------------------
+  // STATE
+  // ----------------------------------------------------------
+
   const [storedUser, setStoredUser] = useState(null);
+
   const [profile, setProfile] = useState(null);
+
   const [interviews, setInterviews] = useState([]);
 
   const [loading, setLoading] = useState(true);
+
   const [profileLoading, setProfileLoading] = useState(true);
 
   const [creatingInterview, setCreatingInterview] = useState(false);
@@ -533,19 +781,17 @@ const Dashboard = () => {
     skills: [],
   });
 
-  // ==========================================================
-  // INITIAL STORED USER
-  // ==========================================================
+  // ----------------------------------------------------------
+  // INITIAL USER
+  // ----------------------------------------------------------
 
   useEffect(() => {
-    const user = getStoredUser();
-
-    setStoredUser(user);
+    setStoredUser(getStoredUser());
   }, []);
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // LOAD PROFILE
-  // ==========================================================
+  // ----------------------------------------------------------
 
   const loadProfile = useCallback(async () => {
     try {
@@ -555,34 +801,43 @@ const Dashboard = () => {
 
       console.log("[DASHBOARD] PROFILE RESPONSE:", response);
 
-      const profileData = getProfileData(response);
+      const profileData = unwrapProfileResponse(response);
 
-      setProfile(profileData);
+      console.log("[DASHBOARD] NORMALIZED PROFILE:", profileData);
 
-      // Keep locally stored basic user information
-      // synchronized when backend provides it.
+      setProfile(profileData || null);
+
+      /*
+          If backend returns a user object inside
+          the profile, merge it into the local
+          stored user without replacing existing
+          authentication information.
+        */
       const returnedUser = profileData?.user || profileData?.userData || null;
 
-      if (returnedUser) {
+      if (returnedUser && typeof returnedUser === "object") {
         setStoredUser((previous) => ({
           ...(previous || {}),
           ...returnedUser,
         }));
       }
     } catch (err) {
-      console.error("[DASHBOARD] Failed to load profile:", err);
+      console.error("[DASHBOARD] PROFILE LOAD ERROR:", err);
 
-      // Profile failure should not prevent
-      // dashboard interviews from loading.
       setProfile(null);
+
+      /*
+          Do not destroy the dashboard if the
+          profile endpoint temporarily fails.
+        */
     } finally {
       setProfileLoading(false);
     }
   }, []);
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // LOAD INTERVIEWS
-  // ==========================================================
+  // ----------------------------------------------------------
 
   const loadInterviews = useCallback(async (showLoader = true) => {
     try {
@@ -590,31 +845,21 @@ const Dashboard = () => {
         setLoading(true);
       }
 
-      setError("");
-
       const response = await getInterviews();
 
-      console.log("[DASHBOARD] GET INTERVIEWS RESPONSE:", response);
+      console.log("[DASHBOARD] INTERVIEWS RESPONSE:", response);
 
-      const responseData = response?.data;
-
-      let list = [];
-
-      if (Array.isArray(responseData)) {
-        list = responseData;
-      } else if (Array.isArray(responseData?.data)) {
-        list = responseData.data;
-      } else if (Array.isArray(responseData?.interviews)) {
-        list = responseData.interviews;
-      } else if (Array.isArray(responseData?.results)) {
-        list = responseData.results;
-      }
+      const list = extractInterviewList(response);
 
       setInterviews(list);
     } catch (err) {
-      console.error("[DASHBOARD] Failed to load interviews:", err);
+      console.error("[DASHBOARD] INTERVIEW LOAD ERROR:", err);
 
-      setError(err?.response?.data?.message || "Unable to load interviews.");
+      setError(
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          "Unable to load interviews.",
+      );
     } finally {
       if (showLoader) {
         setLoading(false);
@@ -622,40 +867,21 @@ const Dashboard = () => {
     }
   }, []);
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // INITIAL LOAD
-  // ==========================================================
+  // ----------------------------------------------------------
 
   useEffect(() => {
-    const initializeDashboard = async () => {
+    const initialize = async () => {
       await Promise.all([loadProfile(), loadInterviews(true)]);
     };
 
-    initializeDashboard();
+    initialize();
   }, [loadProfile, loadInterviews]);
 
-  // ==========================================================
-  // REFRESH DASHBOARD
-  // ==========================================================
-
-  const handleRefresh = useCallback(async () => {
-    if (refreshing) {
-      return;
-    }
-
-    try {
-      setRefreshing(true);
-      setError("");
-
-      await Promise.all([loadProfile(), loadInterviews(false)]);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [refreshing, loadProfile, loadInterviews]);
-
-  // ==========================================================
-  // DERIVED PROFILE
-  // ==========================================================
+  // ----------------------------------------------------------
+  // PROFILE DERIVED DATA
+  // ----------------------------------------------------------
 
   const profileName = useMemo(
     () => getDisplayName(profile, storedUser),
@@ -677,15 +903,14 @@ const Dashboard = () => {
     [profile, storedUser],
   );
 
-  const technicalSkills = useMemo(
-    () => getTechnicalSkills(profile, storedUser),
-    [profile, storedUser],
-  );
+  /*
+    IMPORTANT:
+    Technical skills come from PROFILE ONLY.
+    storedUser is intentionally NOT used here.
+  */
+  const technicalSkills = useMemo(() => getTechnicalSkills(profile), [profile]);
 
-  const socialSkills = useMemo(
-    () => getSocialSkills(profile, storedUser),
-    [profile, storedUser],
-  );
+  const socialSkills = useMemo(() => getSocialSkills(profile), [profile]);
 
   const resume = useMemo(
     () => getResume(profile, storedUser),
@@ -712,30 +937,35 @@ const Dashboard = () => {
     [profile, storedUser],
   );
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // PROFILE COMPLETION
-  // ==========================================================
+  // ----------------------------------------------------------
 
   const profileCompletion = useMemo(
-    () => calculateProfileCompletion(profile, storedUser),
-    [profile, storedUser],
+    () =>
+      calculateProfileCompletion(
+        profile,
+        storedUser,
+        technicalSkills,
+        socialSkills,
+      ),
+    [profile, storedUser, technicalSkills, socialSkills],
   );
 
-  // ==========================================================
-  // INTERVIEW STATUS
-  // ==========================================================
+  // ----------------------------------------------------------
+  // INTERVIEW STATS
+  // ----------------------------------------------------------
 
   const completedInterviews = useMemo(() => {
-    return interviews.filter((interview) => {
-      return (
-        String(getInterviewStatus(interview)).toLowerCase() === "completed"
-      );
-    });
+    return interviews.filter(
+      (interview) =>
+        normalizeStatus(getInterviewStatus(interview)) === "completed",
+    );
   }, [interviews]);
 
   const activeInterviews = useMemo(() => {
     return interviews.filter((interview) => {
-      const status = String(getInterviewStatus(interview)).toLowerCase();
+      const status = normalizeStatus(getInterviewStatus(interview));
 
       return (
         status === "in-progress" ||
@@ -746,14 +976,34 @@ const Dashboard = () => {
   }, [interviews]);
 
   const pausedInterviews = useMemo(() => {
-    return interviews.filter((interview) => {
-      return String(getInterviewStatus(interview)).toLowerCase() === "paused";
-    });
+    return interviews.filter(
+      (interview) =>
+        normalizeStatus(getInterviewStatus(interview)) === "paused",
+    );
   }, [interviews]);
 
-  // ==========================================================
-  // INTERVIEW CREATION
-  // ==========================================================
+  // ----------------------------------------------------------
+  // REFRESH
+  // ----------------------------------------------------------
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) {
+      return;
+    }
+
+    try {
+      setRefreshing(true);
+      setError("");
+
+      await Promise.all([loadProfile(), loadInterviews(false)]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, loadProfile, loadInterviews]);
+
+  // ----------------------------------------------------------
+  // CREATE INTERVIEW
+  // ----------------------------------------------------------
 
   const handleCreateInterview = async () => {
     if (creatingInterview) {
@@ -767,7 +1017,22 @@ const Dashboard = () => {
         "Please add your target role in your profile before starting an interview.",
       );
 
+      setShowCreateModal(false);
+
       navigate("/profile");
+
+      return;
+    }
+
+    if (technicalSkills.length === 0) {
+      setError(
+        "Please add at least one technical skill to your profile before starting an interview.",
+      );
+
+      setShowCreateModal(false);
+
+      navigate("/profile");
+
       return;
     }
 
@@ -775,11 +1040,22 @@ const Dashboard = () => {
       setCreatingInterview(true);
       setError("");
 
-      const selectedSkills = uniqueStrings(createForm.skills);
+      /*
+          Only allow skills that actually exist
+          in the current profile.
+        */
+      const profileSkillMap = new Map(
+        technicalSkills.map((skill) => [skill.toLowerCase(), skill]),
+      );
 
-      const totalQuestions = Math.min(
+      const selectedSkills = uniqueStrings(createForm.skills)
+        .map((skill) => profileSkillMap.get(skill.toLowerCase()))
+        .filter(Boolean);
+
+      const totalQuestions = clamp(
+        Math.round(Number(createForm.questionCount) || 10),
+        1,
         MAX_QUESTIONS,
-        Math.max(1, Math.round(Number(createForm.questionCount) || 10)),
       );
 
       const difficulty = DIFFICULTIES.includes(createForm.difficulty)
@@ -788,38 +1064,38 @@ const Dashboard = () => {
 
       const skillMode = selectedSkills.length > 0 ? "specific" : "all";
 
+      /*
+          IMPORTANT:
+          No dummy skills.
+          No hardcoded role.
+          All interview technologies come
+          directly from the profile.
+        */
       const payload = {
         title: `${role} AI Interview`,
         role,
         interviewType: "mixed",
         difficulty,
         skillMode,
-        technologies: selectedSkills,
+
+        technologies:
+          selectedSkills.length > 0 ? selectedSkills : technicalSkills,
+
         totalQuestions,
       };
 
-      console.log("==================================================");
-
-      console.log("[DASHBOARD] CREATE INTERVIEW PAYLOAD:");
-
-      console.log(payload);
-
-      console.log("==================================================");
+      console.log("[DASHBOARD] CREATE INTERVIEW PAYLOAD:", payload);
 
       const response = await createInterview(payload);
 
       console.log("[DASHBOARD] CREATE INTERVIEW RESPONSE:", response);
 
-      const responseData = response?.data;
-
-      const interview =
-        responseData?.data || responseData?.interview || responseData;
+      const interview = extractCreatedInterview(response);
 
       const interviewId =
-        interview?._id ||
-        interview?.id ||
-        interview?.interviewId ||
-        responseData?.interviewId;
+        getInterviewId(interview) ||
+        response?.data?.interviewId ||
+        response?.interviewId;
 
       if (!interviewId) {
         throw new Error(
@@ -839,11 +1115,12 @@ const Dashboard = () => {
 
       navigate(`/interviews/${interviewId}`);
     } catch (err) {
-      console.error("[DASHBOARD] Create interview failed:", err);
+      console.error("[DASHBOARD] CREATE INTERVIEW ERROR:", err);
 
       const message =
         err?.response?.data?.message ||
         err?.response?.data?.error?.message ||
+        err?.response?.data?.error ||
         err?.message ||
         "Unable to create interview.";
 
@@ -853,27 +1130,29 @@ const Dashboard = () => {
     }
   };
 
-  // ==========================================================
-  // RESUME / OPEN INTERVIEW
-  // ==========================================================
+  // ----------------------------------------------------------
+  // OPEN INTERVIEW
+  // ----------------------------------------------------------
 
   const handleOpenInterview = (interview) => {
     const id = getInterviewId(interview);
 
     if (!id) {
       setError("Interview ID is missing. Cannot open interview.");
+
       return;
     }
 
     navigate(`/interviews/${id}`);
   };
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // NAVIGATION
-  // ==========================================================
+  // ----------------------------------------------------------
 
   const handleNavigation = (menu) => {
     setActiveMenu(menu);
+
     setSidebarOpen(false);
 
     switch (menu) {
@@ -902,23 +1181,25 @@ const Dashboard = () => {
     }
   };
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // LOGOUT
-  // ==========================================================
+  // ----------------------------------------------------------
 
   const handleLogout = () => {
     localStorage.removeItem("accessToken");
+
     sessionStorage.removeItem("accessToken");
 
     localStorage.removeItem("user");
+
     sessionStorage.removeItem("user");
 
     navigate("/login");
   };
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // SKILLS
-  // ==========================================================
+  // ----------------------------------------------------------
 
   const toggleSkill = (skill) => {
     setCreateForm((previous) => {
@@ -926,6 +1207,7 @@ const Dashboard = () => {
 
       return {
         ...previous,
+
         skills: exists
           ? previous.skills.filter((item) => item !== skill)
           : [...previous.skills, skill],
@@ -941,14 +1223,15 @@ const Dashboard = () => {
 
       return {
         ...previous,
+
         skills: allSelected ? [] : [...technicalSkills],
       };
     });
   };
 
-  // ==========================================================
-  // PROFILE CONNECTION STATUS
-  // ==========================================================
+  // ----------------------------------------------------------
+  // EVIDENCE
+  // ----------------------------------------------------------
 
   const evidenceItems = [
     {
@@ -956,16 +1239,19 @@ const Dashboard = () => {
       connected: Boolean(resume),
       icon: FiFileText,
     },
+
     {
       label: "GitHub",
       connected: Boolean(github),
       icon: FiGithub,
     },
+
     {
       label: "LinkedIn",
       connected: Boolean(linkedin),
       icon: FiLinkedin,
     },
+
     {
       label: "LeetCode",
       connected: Boolean(leetcode),
@@ -1009,6 +1295,7 @@ const Dashboard = () => {
 
             <div>
               <strong>AI Interview</strong>
+
               <span>Adaptive Career Coach</span>
             </div>
           </button>
@@ -1021,6 +1308,8 @@ const Dashboard = () => {
             <FiX />
           </button>
         </div>
+
+        {/* PROFILE */}
 
         <div className="sidebar-profile">
           <div className="sidebar-avatar">
@@ -1038,54 +1327,46 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {/* NAVIGATION */}
+
         <nav className="sidebar-nav">
-          <button
-            type="button"
-            className={`nav-item ${activeMenu === "dashboard" ? "active" : ""}`}
+          <NavButton
+            active={activeMenu === "dashboard"}
+            icon={FiHome}
+            label="Dashboard"
             onClick={() => handleNavigation("dashboard")}
-          >
-            <FiHome />
-            <span>Dashboard</span>
-          </button>
+          />
 
-          <button
-            type="button"
-            className={`nav-item ${
-              activeMenu === "interviews" ? "active" : ""
-            }`}
+          <NavButton
+            active={activeMenu === "interviews"}
+            icon={FiCpu}
+            label="AI Interviews"
             onClick={() => handleNavigation("interviews")}
-          >
-            <FiCpu />
-            <span>AI Interviews</span>
-          </button>
+          />
 
-          <button
-            type="button"
-            className={`nav-item ${activeMenu === "analytics" ? "active" : ""}`}
+          <NavButton
+            active={activeMenu === "analytics"}
+            icon={FiBarChart2}
+            label="Analytics"
             onClick={() => handleNavigation("analytics")}
-          >
-            <FiBarChart2 />
-            <span>Analytics</span>
-          </button>
+          />
 
-          <button
-            type="button"
-            className={`nav-item ${activeMenu === "profile" ? "active" : ""}`}
+          <NavButton
+            active={activeMenu === "profile"}
+            icon={FiUser}
+            label="Profile"
             onClick={() => handleNavigation("profile")}
-          >
-            <FiUser />
-            <span>Profile</span>
-          </button>
+          />
 
-          <button
-            type="button"
-            className={`nav-item ${activeMenu === "settings" ? "active" : ""}`}
+          <NavButton
+            active={activeMenu === "settings"}
+            icon={FiSettings}
+            label="Settings"
             onClick={() => handleNavigation("settings")}
-          >
-            <FiSettings />
-            <span>Settings</span>
-          </button>
+          />
         </nav>
+
+        {/* BOTTOM */}
 
         <div className="sidebar-bottom">
           <div className="sidebar-help">
@@ -1097,7 +1378,7 @@ const Dashboard = () => {
               <strong>AI uses your profile as evidence</strong>
 
               <p>
-                Add skills, resume and developer links for more personalized
+                Your profile skills and evidence are used to personalize
                 interviews.
               </p>
             </div>
@@ -1109,6 +1390,7 @@ const Dashboard = () => {
             onClick={handleLogout}
           >
             <FiLogOut />
+
             <span>Logout</span>
           </button>
         </div>
@@ -1119,9 +1401,7 @@ const Dashboard = () => {
       ====================================================== */}
 
       <main className="dashboard-main">
-        {/* ====================================================
-            HEADER
-        ==================================================== */}
+        {/* HEADER */}
 
         <header className="dashboard-header">
           <div className="header-left">
@@ -1145,7 +1425,6 @@ const Dashboard = () => {
           <div className="header-right">
             <button type="button" className="notification-button">
               <FiBell />
-
               <span className="notification-dot" />
             </button>
 
@@ -1173,10 +1452,10 @@ const Dashboard = () => {
           </div>
         </header>
 
+        {/* CONTENT */}
+
         <div className="dashboard-content">
-          {/* ==================================================
-              ERROR
-          ================================================== */}
+          {/* ERROR */}
 
           {error && (
             <div className="dashboard-error">
@@ -1190,9 +1469,7 @@ const Dashboard = () => {
             </div>
           )}
 
-          {/* ==================================================
-              WELCOME
-          ================================================== */}
+          {/* WELCOME */}
 
           <section className="welcome-section">
             <div className="welcome-copy">
@@ -1206,8 +1483,8 @@ const Dashboard = () => {
               </h2>
 
               <p>
-                Your interview questions adapt to your demonstrated ability,
-                profile evidence and previous performance.
+                Your interview adapts to your demonstrated ability, profile
+                evidence and previous performance.
               </p>
 
               <div className="role-line">
@@ -1240,9 +1517,7 @@ const Dashboard = () => {
             </div>
           </section>
 
-          {/* ==================================================
-              QUICK STATS
-          ================================================== */}
+          {/* QUICK STATS */}
 
           <section className="stats-grid">
             <StatCard
@@ -1271,16 +1546,12 @@ const Dashboard = () => {
             />
           </section>
 
-          {/* ==================================================
-              MAIN GRID
-          ================================================== */}
+          {/* MAIN GRID */}
 
           <section className="dashboard-grid">
-            {/* =================================================
-                RECENT INTERVIEWS
-            ================================================= */}
+            {/* RECENT INTERVIEWS */}
 
-            <div className="dashboard-card interviews-card">
+            <div className="dashboard-card">
               <CardHeader
                 eyebrow="INTERVIEW HISTORY"
                 title="Recent Interviews"
@@ -1298,29 +1569,9 @@ const Dashboard = () => {
               />
 
               {loading ? (
-                <div className="loading-state">
-                  <FiRefreshCw className="spin" />
-                  <span>Loading your interviews...</span>
-                </div>
+                <LoadingState text="Loading your interviews..." />
               ) : interviews.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-icon">
-                    <FiCpu />
-                  </div>
-
-                  <h4>No interviews yet</h4>
-
-                  <p>Start your first adaptive interview.</p>
-
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => setShowCreateModal(true)}
-                  >
-                    <FiPlay />
-                    Start Interview
-                  </button>
-                </div>
+                <EmptyInterviews onStart={() => setShowCreateModal(true)} />
               ) : (
                 <div className="interview-list">
                   {interviews.slice(0, 6).map((interview, index) => {
@@ -1328,9 +1579,7 @@ const Dashboard = () => {
 
                     const status = getInterviewStatus(interview);
 
-                    const normalizedStatus = String(status || "").toLowerCase();
-
-                    const completed = normalizedStatus === "completed";
+                    const completed = normalizeStatus(status) === "completed";
 
                     return (
                       <button
@@ -1350,13 +1599,13 @@ const Dashboard = () => {
                             <div className="interview-meta">
                               <span>{getInterviewDate(interview)}</span>
 
-                              <span className="dot-separator">•</span>
+                              <span>•</span>
 
                               <span>{interview?.difficulty || "auto"}</span>
 
                               {interview?.totalQuestions && (
                                 <>
-                                  <span className="dot-separator">•</span>
+                                  <span>•</span>
 
                                   <span>
                                     {interview.totalQuestions} questions
@@ -1385,15 +1634,13 @@ const Dashboard = () => {
               )}
             </div>
 
-            {/* =================================================
-                PROFILE STRENGTH
-            ================================================= */}
+            {/* PROFILE STRENGTH */}
 
-            <div className="dashboard-card profile-card">
+            <div className="dashboard-card">
               <CardHeader
                 eyebrow="PROFILE EVIDENCE"
                 title="Profile Strength"
-                description="More verified evidence gives the AI more context."
+                description="Your profile provides evidence for adaptive interviews."
                 action={
                   <button
                     type="button"
@@ -1431,8 +1678,7 @@ const Dashboard = () => {
                   </strong>
 
                   <p>
-                    Keep your developer evidence connected for better adaptive
-                    interviews.
+                    Complete your profile to give the AI more useful evidence.
                   </p>
                 </div>
               </div>
@@ -1458,6 +1704,16 @@ const Dashboard = () => {
                 />
 
                 <ProfileCheck
+                  label="Social skills"
+                  complete={socialSkills.length > 0}
+                  value={
+                    socialSkills.length > 0
+                      ? `${socialSkills.length} skills`
+                      : "Add skills"
+                  }
+                />
+
+                <ProfileCheck
                   label="Resume"
                   complete={Boolean(resume)}
                   value={resume ? "Connected" : "Missing"}
@@ -1469,8 +1725,10 @@ const Dashboard = () => {
                     Boolean(github) || Boolean(linkedin) || Boolean(leetcode)
                   }
                   value={
-                    [github, linkedin, leetcode].filter(Boolean).length
-                      ? "Connected"
+                    [github, linkedin, leetcode].filter(Boolean).length > 0
+                      ? `${
+                          [github, linkedin, leetcode].filter(Boolean).length
+                        } connected`
                       : "Add links"
                   }
                 />
@@ -1484,6 +1742,7 @@ const Dashboard = () => {
                 {profileCompletion >= 100
                   ? "Review Profile"
                   : "Complete Profile"}
+
                 <FiArrowRight />
               </button>
             </div>
@@ -1499,7 +1758,7 @@ const Dashboard = () => {
               title="Technical Skills"
               description={
                 technicalSkills.length > 0
-                  ? "Only skills currently stored in your profile are shown below."
+                  ? "Only technical skills currently stored in your profile are shown."
                   : "No technical skills are stored in your profile yet."
               }
               action={
@@ -1515,10 +1774,7 @@ const Dashboard = () => {
             />
 
             {profileLoading ? (
-              <div className="skills-loading">
-                <FiRefreshCw className="spin" />
-                Loading profile skills...
-              </div>
+              <LoadingState text="Loading profile skills..." />
             ) : technicalSkills.length > 0 ? (
               <div className="skills-area">
                 {technicalSkills.map((skill) => (
@@ -1538,9 +1794,8 @@ const Dashboard = () => {
                   <strong>No technical skills added</strong>
 
                   <p>
-                    Add your technical skills to your profile. The interview
-                    engine will use these actual skills instead of dummy
-                    options.
+                    Add technical skills to your profile before starting a
+                    technical interview.
                   </p>
                 </div>
 
@@ -1556,22 +1811,15 @@ const Dashboard = () => {
             )}
           </section>
 
-          {/* ==================================================
-              CAREER SIGNALS
-          ================================================== */}
+          {/* CAREER SIGNALS */}
 
           <section className="section-block">
             <div className="section-heading">
-              <div>
-                <span className="section-kicker">CAREER INTELLIGENCE</span>
+              <span className="section-kicker">CAREER INTELLIGENCE</span>
 
-                <h3>Your AI Career Signals</h3>
+              <h3>Your AI Career Signals</h3>
 
-                <p>
-                  These capabilities are built around the evidence already
-                  available in your profile.
-                </p>
-              </div>
+              <p>Analyze the evidence already available in your profile.</p>
             </div>
 
             <div className="feature-grid">
@@ -1584,26 +1832,24 @@ const Dashboard = () => {
               <FeatureCard
                 icon={FiTarget}
                 title="Skill Gap Analyzer"
-                description="Compare your demonstrated skills with your target role."
+                description="Compare demonstrated skills with your target role."
               />
 
               <FeatureCard
                 icon={FiShield}
                 title="Evidence Meter"
-                description="See how strongly each skill is supported by real evidence."
+                description="Measure how strongly each skill is supported by evidence."
               />
             </div>
           </section>
 
-          {/* ==================================================
-              EVIDENCE SOURCES
-          ================================================== */}
+          {/* EVIDENCE SOURCES */}
 
           <section className="dashboard-card evidence-card">
             <CardHeader
               eyebrow="CONNECTED DATA"
               title="AI Evidence Sources"
-              description="The adaptive engine can use these profile sources when available."
+              description="Profile sources available to the adaptive engine."
               action={<FiTrendingUp className="card-header-icon" />}
             />
 
@@ -1648,9 +1894,7 @@ const Dashboard = () => {
             </div>
           </section>
 
-          {/* ==================================================
-              FOOTER
-          ================================================== */}
+          {/* FOOTER */}
 
           <div className="dashboard-footer">
             <button
@@ -1675,10 +1919,8 @@ const Dashboard = () => {
         <div
           className="modal-overlay"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              if (!creatingInterview) {
-                setShowCreateModal(false);
-              }
+            if (event.target === event.currentTarget && !creatingInterview) {
+              setShowCreateModal(false);
             }
           }}
         >
@@ -1717,9 +1959,7 @@ const Dashboard = () => {
               </button>
             </div>
 
-            {/* =================================================
-                ROLE
-            ================================================= */}
+            {/* ROLE */}
 
             <div className="modal-profile-preview">
               <div className="modal-avatar">
@@ -1735,7 +1975,7 @@ const Dashboard = () => {
 
                 <strong>{profileRole || "No target role added"}</strong>
 
-                <p>This role is taken directly from your profile.</p>
+                <p>Taken directly from your profile.</p>
               </div>
 
               <button type="button" onClick={() => navigate("/profile")}>
@@ -1754,9 +1994,7 @@ const Dashboard = () => {
               </div>
             )}
 
-            {/* =================================================
-                DIFFICULTY
-            ================================================= */}
+            {/* DIFFICULTY */}
 
             <div className="form-group">
               <div className="form-label-row">
@@ -1812,20 +2050,17 @@ const Dashboard = () => {
               </div>
 
               <small className="field-hint">
-                Auto can increase or decrease question difficulty based on your
-                demonstrated performance.
+                Auto adjusts difficulty based on demonstrated performance.
               </small>
             </div>
 
-            {/* =================================================
-                QUESTION COUNT
-            ================================================= */}
+            {/* QUESTION COUNT */}
 
             <div className="form-group">
               <div className="form-label-row">
                 <label>Number of Questions</label>
 
-                <span>Max {MAX_QUESTIONS}</span>
+                <span>1–{MAX_QUESTIONS}</span>
               </div>
 
               <div className="question-count-control">
@@ -1886,9 +2121,7 @@ const Dashboard = () => {
               />
             </div>
 
-            {/* =================================================
-                PROFILE SKILLS
-            ================================================= */}
+            {/* PROFILE SKILLS */}
 
             <div className="form-group">
               <div className="form-label-row">
@@ -1931,8 +2164,8 @@ const Dashboard = () => {
                   </div>
 
                   <small className="field-hint">
-                    These are loaded directly from your profile. No dummy skills
-                    are added.
+                    These skills are loaded directly from your profile. No dummy
+                    skills are added.
                   </small>
 
                   <div className="selected-skill-summary">
@@ -1952,11 +2185,11 @@ const Dashboard = () => {
                   <FiCode />
 
                   <div>
-                    <strong>No technical skills in profile</strong>
+                    <strong>No technical skills</strong>
 
                     <p>
-                      Add technical skills in Profile to enable skill-focused
-                      interviews.
+                      Add technical skills in your profile before starting an
+                      interview.
                     </p>
                   </div>
 
@@ -1968,41 +2201,25 @@ const Dashboard = () => {
               )}
             </div>
 
-            {/* =================================================
-                SUMMARY
-            ================================================= */}
+            {/* SUMMARY */}
 
             <div className="interview-config-summary">
-              <div>
-                <span>ROLE</span>
+              <SummaryItem
+                label="ROLE"
+                value={profileRole || "Not configured"}
+              />
 
-                <strong>{profileRole || "Not configured"}</strong>
-              </div>
+              <SummaryItem label="DIFFICULTY" value={createForm.difficulty} />
 
-              <div>
-                <span>DIFFICULTY</span>
+              <SummaryItem label="QUESTIONS" value={createForm.questionCount} />
 
-                <strong>{createForm.difficulty}</strong>
-              </div>
-
-              <div>
-                <span>QUESTIONS</span>
-
-                <strong>{createForm.questionCount}</strong>
-              </div>
-
-              <div>
-                <span>SKILL MODE</span>
-
-                <strong>
-                  {createForm.skills.length > 0 ? "Focused" : "Adaptive"}
-                </strong>
-              </div>
+              <SummaryItem
+                label="SKILL MODE"
+                value={createForm.skills.length > 0 ? "Focused" : "Adaptive"}
+              />
             </div>
 
-            {/* =================================================
-                MODAL ACTIONS
-            ================================================= */}
+            {/* ACTIONS */}
 
             <div className="modal-actions">
               <button
@@ -2018,7 +2235,11 @@ const Dashboard = () => {
                 type="button"
                 className="modal-primary-button"
                 onClick={handleCreateInterview}
-                disabled={creatingInterview || !profileRole}
+                disabled={
+                  creatingInterview ||
+                  !profileRole ||
+                  technicalSkills.length === 0
+                }
               >
                 {creatingInterview ? (
                   <>
@@ -2042,7 +2263,6 @@ const Dashboard = () => {
       ====================================================== */}
 
       <style>{`
-
         * {
           box-sizing: border-box;
         }
@@ -2051,15 +2271,12 @@ const Dashboard = () => {
           --bg: #0c1014;
           --panel: #11161b;
           --panel-2: #151b21;
-          --panel-3: #192128;
           --border: #252d35;
           --border-soft: #1d252d;
           --text: #edf2f7;
           --text-soft: #a7b0ba;
           --text-muted: #6e7984;
           --green: #39e6a1;
-          --green-dark: #1fbd7d;
-          --green-soft: rgba(57, 230, 161, 0.08);
           --red: #ff7a7a;
           --yellow: #f3c76a;
           --blue: #72a7ff;
@@ -2071,15 +2288,10 @@ const Dashboard = () => {
           background:
             radial-gradient(
               circle at 75% 0%,
-              rgba(57, 230, 161, 0.045),
+              rgba(57,230,161,.045),
               transparent 28%
             ),
-            radial-gradient(
-              circle at 15% 20%,
-              rgba(89, 118, 255, 0.035),
-              transparent 25%
-            ),
-            var(--bg);
+            #0c1014;
           color: var(--text);
           font-family:
             Inter,
@@ -2090,20 +2302,17 @@ const Dashboard = () => {
             sans-serif;
         }
 
-        /* =====================================================
-           SIDEBAR
-        ===================================================== */
+        /* SIDEBAR */
 
         .dashboard-sidebar {
           width: 250px;
           min-width: 250px;
-          min-height: 100vh;
+          height: 100vh;
           position: sticky;
           top: 0;
-          height: 100vh;
           display: flex;
           flex-direction: column;
-          background: rgba(13, 17, 21, 0.96);
+          background: rgba(13,17,21,.97);
           border-right: 1px solid var(--border-soft);
           z-index: 100;
         }
@@ -2124,8 +2333,8 @@ const Dashboard = () => {
           display: flex;
           align-items: center;
           gap: 10px;
-          text-align: left;
           padding: 0;
+          text-align: left;
         }
 
         .brand-icon {
@@ -2137,14 +2346,11 @@ const Dashboard = () => {
           justify-content: center;
           background: var(--green);
           color: #08110d;
-          font-size: 17px;
-          box-shadow: 0 0 25px rgba(57, 230, 161, 0.12);
         }
 
         .brand strong {
           display: block;
           font-size: 13px;
-          letter-spacing: -0.2px;
         }
 
         .brand span {
@@ -2152,7 +2358,7 @@ const Dashboard = () => {
           margin-top: 2px;
           color: var(--text-muted);
           font-size: 8px;
-          letter-spacing: 0.6px;
+          letter-spacing: .6px;
           text-transform: uppercase;
         }
 
@@ -2168,13 +2374,11 @@ const Dashboard = () => {
           gap: 10px;
           border: 1px solid var(--border-soft);
           border-radius: 11px;
-          background: rgba(255,255,255,0.018);
+          background: rgba(255,255,255,.018);
         }
 
-        .sidebar-avatar {
-          width: 34px;
-          height: 34px;
-          border-radius: 9px;
+        .sidebar-avatar,
+        .avatar {
           overflow: hidden;
           background: #1c252c;
           display: flex;
@@ -2184,7 +2388,15 @@ const Dashboard = () => {
           flex-shrink: 0;
         }
 
-        .sidebar-avatar img {
+        .sidebar-avatar {
+          width: 34px;
+          height: 34px;
+          border-radius: 9px;
+        }
+
+        .sidebar-avatar img,
+        .avatar img,
+        .modal-avatar img {
           width: 100%;
           height: 100%;
           object-fit: cover;
@@ -2194,20 +2406,20 @@ const Dashboard = () => {
           min-width: 0;
         }
 
-        .sidebar-profile-info strong {
+        .sidebar-profile-info strong,
+        .sidebar-profile-info span {
           display: block;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+
+        .sidebar-profile-info strong {
           font-size: 10px;
         }
 
         .sidebar-profile-info span {
-          display: block;
           margin-top: 3px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
           color: var(--text-muted);
           font-size: 8px;
         }
@@ -2233,23 +2445,17 @@ const Dashboard = () => {
           text-align: left;
           font-size: 11px;
           font-weight: 600;
-          transition: 0.2s ease;
         }
 
         .nav-item:hover {
-          background: rgba(255,255,255,0.025);
+          background: rgba(255,255,255,.025);
           color: var(--text-soft);
         }
 
         .nav-item.active {
-          border-color: rgba(57, 230, 161, 0.12);
-          background: rgba(57, 230, 161, 0.07);
+          border-color: rgba(57,230,161,.12);
+          background: rgba(57,230,161,.07);
           color: var(--green);
-        }
-
-        .nav-item svg {
-          font-size: 15px;
-          flex-shrink: 0;
         }
 
         .sidebar-bottom {
@@ -2263,7 +2469,7 @@ const Dashboard = () => {
           padding: 12px;
           border: 1px solid var(--border-soft);
           border-radius: 11px;
-          background: rgba(255,255,255,0.015);
+          background: rgba(255,255,255,.015);
           margin-bottom: 10px;
         }
 
@@ -2271,18 +2477,17 @@ const Dashboard = () => {
           width: 28px;
           height: 28px;
           border-radius: 8px;
-          flex-shrink: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(57,230,161,0.08);
+          background: rgba(57,230,161,.08);
           color: var(--green);
+          flex-shrink: 0;
         }
 
         .sidebar-help strong {
           display: block;
           font-size: 9px;
-          color: #c8d0d8;
         }
 
         .sidebar-help p {
@@ -2294,7 +2499,7 @@ const Dashboard = () => {
 
         .logout-button {
           width: 100%;
-          border: 1px solid transparent;
+          border: 0;
           background: transparent;
           color: #68737e;
           padding: 10px 12px;
@@ -2302,20 +2507,10 @@ const Dashboard = () => {
           display: flex;
           align-items: center;
           gap: 10px;
-          font-size: 10px;
-          font-weight: 600;
           cursor: pointer;
-          text-align: left;
         }
 
-        .logout-button:hover {
-          color: #a8b1ba;
-          background: rgba(255,255,255,0.02);
-        }
-
-        /* =====================================================
-           MAIN
-        ===================================================== */
+        /* MAIN */
 
         .dashboard-main {
           flex: 1;
@@ -2328,7 +2523,7 @@ const Dashboard = () => {
           top: 0;
           z-index: 50;
           border-bottom: 1px solid var(--border-soft);
-          background: rgba(12, 16, 20, 0.9);
+          background: rgba(12,16,20,.9);
           backdrop-filter: blur(16px);
           display: flex;
           align-items: center;
@@ -2336,15 +2531,22 @@ const Dashboard = () => {
           padding: 0 30px;
         }
 
-        .header-left {
+        .header-left,
+        .header-right {
           display: flex;
           align-items: center;
+        }
+
+        .header-left {
+          gap: 12px;
+        }
+
+        .header-right {
           gap: 12px;
         }
 
         .header-kicker {
           display: block;
-          margin-bottom: 2px;
           color: #56626d;
           font-size: 7px;
           font-weight: 800;
@@ -2354,7 +2556,6 @@ const Dashboard = () => {
         .header-left h1 {
           margin: 0;
           font-size: 19px;
-          letter-spacing: -0.4px;
         }
 
         .header-left p {
@@ -2363,29 +2564,18 @@ const Dashboard = () => {
           font-size: 9px;
         }
 
-        .header-right {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
         .notification-button {
           width: 34px;
           height: 34px;
           border-radius: 9px;
           border: 1px solid var(--border);
-          background: #11161b;
+          background: var(--panel);
           color: #76818c;
           display: flex;
           align-items: center;
           justify-content: center;
           position: relative;
           cursor: pointer;
-        }
-
-        .notification-button:hover {
-          color: #b6c0c8;
-          border-color: #313b45;
         }
 
         .notification-dot {
@@ -2396,7 +2586,6 @@ const Dashboard = () => {
           position: absolute;
           top: 7px;
           right: 7px;
-          box-shadow: 0 0 8px rgba(57,230,161,0.7);
         }
 
         .header-profile {
@@ -2408,39 +2597,25 @@ const Dashboard = () => {
           gap: 9px;
           cursor: pointer;
           text-align: left;
-          padding: 0;
         }
 
         .avatar {
           width: 34px;
           height: 34px;
           border-radius: 9px;
-          overflow: hidden;
-          background: #1c252c;
           border: 1px solid var(--border);
-          color: #78838e;
-          display: flex;
-          align-items: center;
-          justify-content: center;
         }
 
-        .avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .header-user {
-          min-width: 100px;
+        .header-user strong,
+        .header-user span {
+          display: block;
         }
 
         .header-user strong {
-          display: block;
           font-size: 10px;
         }
 
         .header-user span {
-          display: block;
           max-width: 145px;
           margin-top: 2px;
           color: #69747f;
@@ -2450,18 +2625,11 @@ const Dashboard = () => {
           white-space: nowrap;
         }
 
-        .header-profile > svg {
-          color: #57616b;
-          font-size: 13px;
-        }
-
         .mobile-menu {
           display: none;
         }
 
-        /* =====================================================
-           CONTENT
-        ===================================================== */
+        /* CONTENT */
 
         .dashboard-content {
           width: min(1420px, 100%);
@@ -2470,8 +2638,8 @@ const Dashboard = () => {
         }
 
         .dashboard-error {
-          border: 1px solid rgba(255, 122, 122, 0.15);
-          background: rgba(255, 122, 122, 0.06);
+          border: 1px solid rgba(255,122,122,.15);
+          background: rgba(255,122,122,.06);
           color: #ff9f9f;
           min-height: 39px;
           border-radius: 9px;
@@ -2494,9 +2662,7 @@ const Dashboard = () => {
           cursor: pointer;
         }
 
-        /* =====================================================
-           WELCOME
-        ===================================================== */
+        /* WELCOME */
 
         .welcome-section {
           min-height: 190px;
@@ -2505,37 +2671,15 @@ const Dashboard = () => {
           background:
             radial-gradient(
               circle at 85% 20%,
-              rgba(57, 230, 161, 0.08),
+              rgba(57,230,161,.08),
               transparent 30%
             ),
-            linear-gradient(
-              135deg,
-              rgba(255,255,255,0.025),
-              rgba(255,255,255,0.008)
-            );
+            rgba(255,255,255,.015);
           padding: 26px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 30px;
-          overflow: hidden;
-          position: relative;
-        }
-
-        .welcome-section::after {
-          content: "";
-          width: 180px;
-          height: 180px;
-          position: absolute;
-          right: -75px;
-          top: -75px;
-          border: 1px solid rgba(57,230,161,0.08);
-          border-radius: 50%;
-        }
-
-        .welcome-copy {
-          position: relative;
-          z-index: 1;
         }
 
         .welcome-badge {
@@ -2553,15 +2697,12 @@ const Dashboard = () => {
           height: 5px;
           border-radius: 50%;
           background: var(--green);
-          box-shadow: 0 0 9px rgba(57,230,161,0.8);
         }
 
         .welcome-section h2 {
-          max-width: 680px;
           margin: 10px 0 0;
           font-size: 30px;
           line-height: 1.08;
-          letter-spacing: -1px;
         }
 
         .welcome-section h2 span {
@@ -2595,17 +2736,13 @@ const Dashboard = () => {
         }
 
         .welcome-actions {
-          position: relative;
-          z-index: 1;
           display: flex;
           flex-direction: column;
           gap: 8px;
           min-width: 170px;
         }
 
-        /* =====================================================
-           BUTTONS
-        ===================================================== */
+        /* BUTTONS */
 
         .primary-button,
         .ghost-button,
@@ -2623,7 +2760,6 @@ const Dashboard = () => {
           cursor: pointer;
           font-size: 9px;
           font-weight: 700;
-          transition: 0.2s ease;
         }
 
         .primary-button {
@@ -2631,51 +2767,21 @@ const Dashboard = () => {
           background: var(--green);
           color: #07100c;
           padding: 0 15px;
-          box-shadow: 0 0 25px rgba(57,230,161,0.07);
         }
 
-        .primary-button:hover {
-          background: #54edb0;
-          transform: translateY(-1px);
-        }
-
-        .ghost-button {
-          border: 1px solid var(--border);
-          background: rgba(255,255,255,0.018);
-          color: #9aa4ad;
-          padding: 0 15px;
-        }
-
-        .ghost-button:hover {
-          background: rgba(255,255,255,0.04);
-          color: #d4dae0;
-        }
-
-        .secondary-button {
-          border: 1px solid #2b353e;
-          background: #171e24;
-          color: #b6c0c9;
-          padding: 0 15px;
-        }
-
-        .secondary-button:hover {
-          border-color: #3a4650;
-          background: #1b232a;
-        }
-
-        .outline-small-button {
+        .ghost-button,
+        .outline-small-button,
+        .modal-secondary-button {
           border: 1px solid var(--border);
           background: transparent;
           color: #9ba5af;
+          padding: 0 15px;
+        }
+
+        .outline-small-button {
           min-height: 31px;
           padding: 0 10px;
           font-size: 8px;
-        }
-
-        .outline-small-button:hover {
-          border-color: #3a4650;
-          color: #d6dde3;
-          background: rgba(255,255,255,0.02);
         }
 
         .profile-button {
@@ -2685,11 +2791,6 @@ const Dashboard = () => {
           background: #151c22;
           color: #b9c1c9;
           padding: 0 14px;
-        }
-
-        .profile-button:hover {
-          border-color: #3c4852;
-          background: #1a2229;
         }
 
         .icon-card-action {
@@ -2705,14 +2806,7 @@ const Dashboard = () => {
           cursor: pointer;
         }
 
-        .icon-card-action:hover {
-          color: var(--green);
-          border-color: rgba(57,230,161,0.2);
-        }
-
-        /* =====================================================
-           STATS
-        ===================================================== */
+        /* STATS */
 
         .stats-grid {
           margin: 18px 0;
@@ -2732,20 +2826,16 @@ const Dashboard = () => {
           gap: 11px;
         }
 
-        .stat-card:hover {
-          border-color: #303a43;
-        }
-
         .stat-card-icon {
           width: 37px;
           height: 37px;
           border-radius: 9px;
-          flex-shrink: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(57,230,161,0.055);
+          background: rgba(57,230,161,.055);
           color: var(--green);
+          flex-shrink: 0;
         }
 
         .stat-card-copy span {
@@ -2757,33 +2847,35 @@ const Dashboard = () => {
         .stat-card-copy strong {
           display: block;
           margin-top: 4px;
-          color: #e8edf1;
           font-size: 21px;
-          letter-spacing: -0.7px;
         }
 
-        .stat-card-progress {
+        .stat-card-progress,
+        .progress-track {
           width: 100%;
-          height: 3px;
-          border-radius: 5px;
-          background: #232b32;
-          margin-top: 8px;
+          background: #20272e;
           overflow: hidden;
         }
 
-        .stat-card-progress div {
+        .stat-card-progress {
+          height: 3px;
+          border-radius: 5px;
+          margin-top: 8px;
+        }
+
+        .stat-card-progress div,
+        .progress-value {
           height: 100%;
-          border-radius: inherit;
           background: var(--green);
         }
 
-        /* =====================================================
-           CARDS
-        ===================================================== */
+        /* GRID */
 
         .dashboard-grid {
           display: grid;
-          grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.85fr);
+          grid-template-columns:
+            minmax(0, 1.7fr)
+            minmax(300px, .85fr);
           gap: 14px;
         }
 
@@ -2802,10 +2894,6 @@ const Dashboard = () => {
           margin-bottom: 18px;
         }
 
-        .card-header-copy {
-          min-width: 0;
-        }
-
         .card-eyebrow,
         .section-kicker {
           display: block;
@@ -2818,9 +2906,7 @@ const Dashboard = () => {
 
         .card-header h3 {
           margin: 0;
-          color: #e6ebef;
           font-size: 14px;
-          letter-spacing: -0.3px;
         }
 
         .card-header p {
@@ -2831,14 +2917,7 @@ const Dashboard = () => {
           line-height: 1.55;
         }
 
-        .card-header-icon {
-          color: #65717c;
-          font-size: 17px;
-        }
-
-        /* =====================================================
-           INTERVIEWS
-        ===================================================== */
+        /* INTERVIEWS */
 
         .interview-list {
           display: flex;
@@ -2860,10 +2939,6 @@ const Dashboard = () => {
           text-align: left;
         }
 
-        .interview-row:hover {
-          background: rgba(255,255,255,0.012);
-        }
-
         .interview-main {
           display: flex;
           align-items: center;
@@ -2875,13 +2950,13 @@ const Dashboard = () => {
           width: 34px;
           height: 34px;
           border-radius: 9px;
-          flex-shrink: 0;
           display: flex;
           align-items: center;
           justify-content: center;
           background: #171e24;
           border: 1px solid var(--border-soft);
           color: var(--green);
+          flex-shrink: 0;
         }
 
         .interview-details {
@@ -2896,7 +2971,6 @@ const Dashboard = () => {
           white-space: nowrap;
           color: #cbd3da;
           font-size: 10px;
-          font-weight: 700;
         }
 
         .interview-meta {
@@ -2906,10 +2980,6 @@ const Dashboard = () => {
           gap: 5px;
           color: #626e79;
           font-size: 7px;
-        }
-
-        .dot-separator {
-          color: #38424b;
         }
 
         .interview-actions {
@@ -2928,22 +2998,22 @@ const Dashboard = () => {
         }
 
         .status-completed {
-          background: rgba(57,230,161,0.08);
+          background: rgba(57,230,161,.08);
           color: #54dca9;
         }
 
         .status-progress {
-          background: rgba(114,167,255,0.08);
+          background: rgba(114,167,255,.08);
           color: #78abff;
         }
 
         .status-cancelled {
-          background: rgba(255,122,122,0.07);
+          background: rgba(255,122,122,.07);
           color: #ee8a8a;
         }
 
         .status-paused {
-          background: rgba(243,199,106,0.08);
+          background: rgba(243,199,106,.08);
           color: #dbba6e;
         }
 
@@ -2964,23 +3034,12 @@ const Dashboard = () => {
           background: #151b21;
         }
 
-        .interview-row:hover .row-arrow {
-          color: var(--green);
-          border-color: rgba(57,230,161,0.18);
-        }
-
-        /* =====================================================
-           PROFILE
-        ===================================================== */
+        /* PROFILE */
 
         .profile-overview {
           display: flex;
           align-items: center;
           gap: 14px;
-        }
-
-        .profile-circle {
-          flex-shrink: 0;
         }
 
         .profile-circle-progress {
@@ -3002,7 +3061,6 @@ const Dashboard = () => {
         }
 
         .profile-circle-inner strong {
-          color: #eaf1f4;
           font-size: 20px;
         }
 
@@ -3014,7 +3072,6 @@ const Dashboard = () => {
 
         .profile-overview-info strong {
           display: block;
-          color: #d6dde3;
           font-size: 10px;
         }
 
@@ -3029,17 +3086,11 @@ const Dashboard = () => {
         .progress-track {
           height: 4px;
           border-radius: 20px;
-          background: #20272e;
           margin-top: 15px;
-          overflow: hidden;
         }
 
         .progress-value {
-          height: 100%;
           border-radius: inherit;
-          background: var(--green);
-          box-shadow: 0 0 10px rgba(57,230,161,0.15);
-          transition: width 0.35s ease;
         }
 
         .profile-checklist {
@@ -3067,7 +3118,7 @@ const Dashboard = () => {
         }
 
         .profile-check.complete .profile-check-icon {
-          background: rgba(57,230,161,0.08);
+          background: rgba(57,230,161,.08);
           color: var(--green);
         }
 
@@ -3087,12 +3138,9 @@ const Dashboard = () => {
         .profile-check-copy strong {
           color: #b6c0c8;
           font-size: 8px;
-          font-weight: 600;
         }
 
-        /* =====================================================
-           SKILLS
-        ===================================================== */
+        /* SKILLS */
 
         .skills-card {
           grid-column: 1 / -1;
@@ -3112,32 +3160,18 @@ const Dashboard = () => {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          border: 1px solid rgba(57,230,161,0.1);
-          background: rgba(57,230,161,0.055);
+          border: 1px solid rgba(57,230,161,.1);
+          background: rgba(57,230,161,.055);
           color: #8de5bd;
           font-size: 8px;
           font-weight: 600;
-        }
-
-        .skill-tag svg {
-          font-size: 9px;
-        }
-
-        .skills-loading {
-          min-height: 75px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          color: #68737e;
-          font-size: 8px;
         }
 
         .skills-empty {
           min-height: 82px;
           border: 1px dashed #303943;
           border-radius: 10px;
-          background: rgba(255,255,255,0.012);
+          background: rgba(255,255,255,.012);
           padding: 12px;
           display: flex;
           align-items: center;
@@ -3164,7 +3198,6 @@ const Dashboard = () => {
 
         .skills-empty-copy strong {
           display: block;
-          color: #aeb7bf;
           font-size: 9px;
         }
 
@@ -3175,9 +3208,7 @@ const Dashboard = () => {
           line-height: 1.55;
         }
 
-        /* =====================================================
-           SECTION
-        ===================================================== */
+        /* SECTION */
 
         .section-block {
           margin-top: 28px;
@@ -3190,7 +3221,6 @@ const Dashboard = () => {
         .section-heading h3 {
           margin: 0;
           font-size: 16px;
-          letter-spacing: -0.35px;
         }
 
         .section-heading p {
@@ -3199,9 +3229,7 @@ const Dashboard = () => {
           font-size: 8px;
         }
 
-        /* =====================================================
-           FEATURES
-        ===================================================== */
+        /* FEATURES */
 
         .feature-grid {
           display: grid;
@@ -3218,13 +3246,6 @@ const Dashboard = () => {
           display: flex;
           align-items: flex-start;
           gap: 10px;
-          transition: 0.2s ease;
-          cursor: pointer;
-        }
-
-        .feature-card:hover {
-          border-color: #333e47;
-          transform: translateY(-1px);
         }
 
         .feature-icon {
@@ -3236,7 +3257,7 @@ const Dashboard = () => {
           align-items: center;
           justify-content: center;
           color: var(--green);
-          background: rgba(57,230,161,0.06);
+          background: rgba(57,230,161,.06);
         }
 
         .feature-copy {
@@ -3245,7 +3266,6 @@ const Dashboard = () => {
 
         .feature-copy h4 {
           margin: 0;
-          color: #c9d1d8;
           font-size: 10px;
         }
 
@@ -3256,13 +3276,7 @@ const Dashboard = () => {
           line-height: 1.55;
         }
 
-        .feature-arrow {
-          color: #4d5862;
-        }
-
-        /* =====================================================
-           EVIDENCE
-        ===================================================== */
+        /* EVIDENCE */
 
         .evidence-card {
           margin-top: 14px;
@@ -3285,11 +3299,11 @@ const Dashboard = () => {
         }
 
         .evidence-item.connected {
-          border-color: rgba(57,230,161,0.1);
+          border-color: rgba(57,230,161,.1);
         }
 
         .evidence-item.not-connected {
-          opacity: 0.75;
+          opacity: .75;
         }
 
         .evidence-icon {
@@ -3305,7 +3319,7 @@ const Dashboard = () => {
         }
 
         .evidence-item.connected .evidence-icon {
-          background: rgba(57,230,161,0.06);
+          background: rgba(57,230,161,.06);
           color: var(--green);
         }
 
@@ -3323,7 +3337,6 @@ const Dashboard = () => {
         .evidence-item strong {
           display: block;
           margin-top: 3px;
-          color: #bac3ca;
           font-size: 8px;
         }
 
@@ -3332,7 +3345,8 @@ const Dashboard = () => {
           color: #4e5a64;
         }
 
-        .evidence-item.connected .evidence-status-icon {
+        .evidence-item.connected
+        .evidence-status-icon {
           color: var(--green);
         }
 
@@ -3345,16 +3359,15 @@ const Dashboard = () => {
           justify-content: space-between;
         }
 
-        .evidence-footer > div span {
+        .evidence-footer span {
           display: block;
           color: #64707b;
           font-size: 7px;
         }
 
-        .evidence-footer > div strong {
+        .evidence-footer strong {
           display: block;
           margin-top: 2px;
-          color: #bbc4cc;
           font-size: 11px;
         }
 
@@ -3370,14 +3383,9 @@ const Dashboard = () => {
           font-weight: 700;
         }
 
-        .evidence-footer button:hover {
-          color: var(--green);
-        }
+        /* LOADING */
 
-        /* =====================================================
-           EMPTY / LOADING
-        ===================================================== */
-
+        .loading-state,
         .empty-state {
           min-height: 190px;
           display: flex;
@@ -3385,6 +3393,8 @@ const Dashboard = () => {
           align-items: center;
           justify-content: center;
           text-align: center;
+          color: #68737e;
+          font-size: 8px;
         }
 
         .empty-icon {
@@ -3411,23 +3421,10 @@ const Dashboard = () => {
           font-size: 8px;
         }
 
-        .loading-state {
-          min-height: 190px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          color: #68737e;
-          font-size: 8px;
-        }
-
-        /* =====================================================
-           FOOTER
-        ===================================================== */
+        /* FOOTER */
 
         .dashboard-footer {
           display: flex;
-          align-items: center;
           justify-content: center;
           margin-top: 20px;
         }
@@ -3443,20 +3440,14 @@ const Dashboard = () => {
           font-size: 8px;
         }
 
-        .refresh-button:hover {
-          color: #96a1ab;
-        }
-
-        /* =====================================================
-           MODAL
-        ===================================================== */
+        /* MODAL */
 
         .modal-overlay {
           position: fixed;
           inset: 0;
           z-index: 1000;
           padding: 20px;
-          background: rgba(2, 5, 8, 0.77);
+          background: rgba(2,5,8,.77);
           backdrop-filter: blur(8px);
           display: flex;
           align-items: center;
@@ -3470,16 +3461,8 @@ const Dashboard = () => {
           position: relative;
           border: 1px solid #2a333b;
           border-radius: 15px;
-          background:
-            radial-gradient(
-              circle at 90% 0%,
-              rgba(57,230,161,0.055),
-              transparent 26%
-            ),
-            #11171c;
-          box-shadow:
-            0 30px 100px rgba(0,0,0,0.48),
-            0 0 0 1px rgba(255,255,255,0.01);
+          background: #11171c;
+          box-shadow: 0 30px 100px rgba(0,0,0,.48);
           padding: 21px;
         }
 
@@ -3489,14 +3472,12 @@ const Dashboard = () => {
           right: 0;
           top: 0;
           height: 2px;
-          border-radius: 15px 15px 0 0;
           background: linear-gradient(
             90deg,
             transparent,
             var(--green),
             transparent
           );
-          opacity: 0.75;
         }
 
         .modal-header {
@@ -3520,7 +3501,6 @@ const Dashboard = () => {
         .modal-header h2 {
           margin: 7px 0 0;
           font-size: 20px;
-          letter-spacing: -0.5px;
         }
 
         .modal-header p {
@@ -3544,11 +3524,6 @@ const Dashboard = () => {
           cursor: pointer;
         }
 
-        .modal-close:hover {
-          color: #d2d8dd;
-          background: #1a2229;
-        }
-
         .modal-profile-preview {
           padding: 12px;
           display: flex;
@@ -3556,7 +3531,7 @@ const Dashboard = () => {
           gap: 10px;
           border: 1px solid var(--border-soft);
           border-radius: 10px;
-          background: rgba(255,255,255,0.014);
+          background: rgba(255,255,255,.014);
           margin-bottom: 11px;
         }
 
@@ -3571,12 +3546,6 @@ const Dashboard = () => {
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
-        }
-
-        .modal-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
         }
 
         .modal-profile-preview > div:nth-child(2) {
@@ -3595,7 +3564,6 @@ const Dashboard = () => {
         .modal-profile-preview strong {
           display: block;
           margin-top: 3px;
-          color: #d1d8de;
           font-size: 10px;
         }
 
@@ -3615,9 +3583,9 @@ const Dashboard = () => {
         }
 
         .modal-warning {
-          border: 1px solid rgba(243,199,106,0.13);
+          border: 1px solid rgba(243,199,106,.13);
           border-radius: 8px;
-          background: rgba(243,199,106,0.045);
+          background: rgba(243,199,106,.045);
           color: #d5b66f;
           padding: 8px 10px;
           display: flex;
@@ -3667,14 +3635,9 @@ const Dashboard = () => {
           text-align: left;
         }
 
-        .difficulty-option:hover {
-          border-color: #37434d;
-          background: #192128;
-        }
-
         .difficulty-option.selected {
-          border-color: rgba(57,230,161,0.32);
-          background: rgba(57,230,161,0.07);
+          border-color: rgba(57,230,161,.32);
+          background: rgba(57,230,161,.07);
           color: #d8efe5;
         }
 
@@ -3689,11 +3652,6 @@ const Dashboard = () => {
           margin-top: 4px;
           color: #59656f;
           font-size: 6px;
-          line-height: 1.3;
-        }
-
-        .difficulty-option.selected small {
-          color: #638b7a;
         }
 
         .option-check {
@@ -3701,7 +3659,6 @@ const Dashboard = () => {
           top: 8px;
           right: 8px;
           color: var(--green);
-          font-size: 10px;
         }
 
         .field-hint {
@@ -3734,13 +3691,8 @@ const Dashboard = () => {
           font-size: 17px;
         }
 
-        .question-count-control button:hover:not(:disabled) {
-          background: #1e272f;
-          border-color: #3a4650;
-        }
-
         .question-count-control button:disabled {
-          opacity: 0.28;
+          opacity: .28;
           cursor: not-allowed;
         }
 
@@ -3751,7 +3703,6 @@ const Dashboard = () => {
 
         .question-count-control strong {
           display: block;
-          color: #e2e9ee;
           font-size: 22px;
         }
 
@@ -3773,9 +3724,7 @@ const Dashboard = () => {
           overflow-y: auto;
           display: flex;
           flex-wrap: wrap;
-          align-content: flex-start;
           gap: 6px;
-          padding-right: 2px;
         }
 
         .skill-chip {
@@ -3792,15 +3741,10 @@ const Dashboard = () => {
           font-size: 7px;
         }
 
-        .skill-chip:hover {
-          border-color: #38444e;
-          background: #192128;
-        }
-
         .skill-chip.selected {
           color: #a4e8c9;
-          background: rgba(57,230,161,0.08);
-          border-color: rgba(57,230,161,0.23);
+          background: rgba(57,230,161,.08);
+          border-color: rgba(57,230,161,.23);
         }
 
         .select-all-button {
@@ -3838,13 +3782,6 @@ const Dashboard = () => {
           display: flex;
           align-items: center;
           gap: 9px;
-          background: rgba(255,255,255,0.01);
-        }
-
-        .no-profile-skills > svg {
-          color: #697580;
-          font-size: 17px;
-          flex-shrink: 0;
         }
 
         .no-profile-skills > div {
@@ -3854,14 +3791,12 @@ const Dashboard = () => {
         .no-profile-skills strong {
           display: block;
           font-size: 8px;
-          color: #afb8c0;
         }
 
         .no-profile-skills p {
           margin: 3px 0 0;
           color: #606b76;
           font-size: 7px;
-          line-height: 1.45;
         }
 
         .no-profile-skills button {
@@ -3887,16 +3822,12 @@ const Dashboard = () => {
           background: #12191f;
         }
 
-        .interview-config-summary div {
-          min-width: 0;
-        }
-
         .interview-config-summary span {
           display: block;
           color: #56616c;
           font-size: 6px;
           font-weight: 800;
-          letter-spacing: 0.8px;
+          letter-spacing: .8px;
         }
 
         .interview-config-summary strong {
@@ -3918,16 +3849,12 @@ const Dashboard = () => {
           border-top: 1px solid var(--border-soft);
         }
 
-        .modal-secondary-button {
+        .modal-secondary-button,
+        .modal-primary-button {
           min-height: 36px;
-          padding: 0 14px;
-          border: 1px solid var(--border);
-          background: #151c22;
-          color: #8a959f;
         }
 
         .modal-primary-button {
-          min-height: 36px;
           padding: 0 14px;
           border: 1px solid var(--green);
           background: var(--green);
@@ -3936,16 +3863,14 @@ const Dashboard = () => {
 
         .modal-secondary-button:disabled,
         .modal-primary-button:disabled {
-          opacity: 0.4;
+          opacity: .4;
           cursor: not-allowed;
         }
 
-        /* =====================================================
-           SPINNER
-        ===================================================== */
+        /* SPINNER */
 
         .spin {
-          animation: spin 0.8s linear infinite;
+          animation: spin .8s linear infinite;
         }
 
         @keyframes spin {
@@ -3958,9 +3883,7 @@ const Dashboard = () => {
           }
         }
 
-        /* =====================================================
-           RESPONSIVE
-        ===================================================== */
+        /* MOBILE */
 
         @media (max-width: 1100px) {
           .stats-grid {
@@ -3987,7 +3910,7 @@ const Dashboard = () => {
             top: 0;
             bottom: 0;
             transform: translateX(-100%);
-            transition: transform 0.25s ease;
+            transition: transform .25s ease;
           }
 
           .dashboard-sidebar.sidebar-open {
@@ -3998,7 +3921,7 @@ const Dashboard = () => {
             position: fixed;
             inset: 0;
             z-index: 90;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,.6);
           }
 
           .mobile-close {
@@ -4033,10 +3956,6 @@ const Dashboard = () => {
           }
 
           .header-user {
-            display: none;
-          }
-
-          .header-profile > svg {
             display: none;
           }
 
@@ -4128,10 +4047,6 @@ const Dashboard = () => {
             align-items: flex-end;
           }
 
-          .status-badge {
-            font-size: 6px;
-          }
-
           .create-modal {
             padding: 16px;
           }
@@ -4144,9 +4059,25 @@ const Dashboard = () => {
             gap: 16px;
           }
         }
-
       `}</style>
     </div>
+  );
+};
+
+// ============================================================
+// NAV BUTTON
+// ============================================================
+
+const NavButton = ({ active, icon: Icon, label, onClick }) => {
+  return (
+    <button
+      type="button"
+      className={`nav-item ${active ? "active" : ""}`}
+      onClick={onClick}
+    >
+      <Icon />
+      <span>{label}</span>
+    </button>
   );
 };
 
@@ -4187,7 +4118,7 @@ const StatCard = ({ icon: Icon, label, value, progress }) => {
 const CardHeader = ({ eyebrow, title, description, action }) => {
   return (
     <div className="card-header">
-      <div className="card-header-copy">
+      <div>
         <span className="card-eyebrow">{eyebrow}</span>
 
         <h3>{title}</h3>
@@ -4237,7 +4168,58 @@ const FeatureCard = ({ icon: Icon, title, description }) => {
         <p>{description}</p>
       </div>
 
-      <FiChevronRight className="feature-arrow" />
+      <FiChevronRight />
+    </div>
+  );
+};
+
+// ============================================================
+// SUMMARY ITEM
+// ============================================================
+
+const SummaryItem = ({ label, value }) => {
+  return (
+    <div>
+      <span>{label}</span>
+
+      <strong>{value}</strong>
+    </div>
+  );
+};
+
+// ============================================================
+// LOADING
+// ============================================================
+
+const LoadingState = ({ text }) => {
+  return (
+    <div className="loading-state">
+      <FiRefreshCw className="spin" />
+
+      <span>{text}</span>
+    </div>
+  );
+};
+
+// ============================================================
+// EMPTY INTERVIEWS
+// ============================================================
+
+const EmptyInterviews = ({ onStart }) => {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon">
+        <FiCpu />
+      </div>
+
+      <h4>No interviews yet</h4>
+
+      <p>Start your first adaptive interview.</p>
+
+      <button type="button" className="secondary-button" onClick={onStart}>
+        <FiPlay />
+        Start Interview
+      </button>
     </div>
   );
 };

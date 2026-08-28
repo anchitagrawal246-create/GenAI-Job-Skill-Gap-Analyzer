@@ -43,7 +43,7 @@ async function updateProfileController(req, res) {
 
     const result = await updateProfile(
       userId,
-      req.body,
+      req.body || {},
       req.files || {}
     );
 
@@ -54,7 +54,6 @@ async function updateProfileController(req, res) {
 
       profile: {
         ...result.profile.toObject(),
-
         profileCompletion:
           result.profileCompletion,
       },
@@ -66,10 +65,12 @@ async function updateProfileController(req, res) {
       success: false,
 
       message:
-        error.message || "Failed to update profile",
+        error.message ||
+        "Failed to update profile",
 
       code:
-        error.code || "PROFILE_UPDATE_FAILED",
+        error.code ||
+        "PROFILE_UPDATE_FAILED",
     });
   }
 }
