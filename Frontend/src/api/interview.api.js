@@ -37,7 +37,10 @@ interviewApi.interceptors.request.use(
     console.log("==================================================");
     console.log("[INTERVIEW API REQUEST]");
     console.log("METHOD:", config.method?.toUpperCase());
-    console.log("URL:", `${config.baseURL}${config.url}`);
+    console.log(
+      "URL:",
+      `${config.baseURL}${config.url}`
+    );
     console.log("PARAMS:", config.params);
     console.log("BODY:", config.data);
     console.log("HAS TOKEN:", Boolean(token));
@@ -87,8 +90,11 @@ interviewApi.interceptors.response.use(
       error?.config?.method?.toUpperCase()
     );
     console.error("REQUEST BODY:", error?.config?.data);
-    console.error("STACK:", error?.stack);
     console.error("==================================================");
+
+    // ========================================================
+    // AUTH FAILURE
+    // ========================================================
 
     if (
       status === 401 &&
@@ -119,29 +125,35 @@ interviewApi.interceptors.response.use(
 // INTERVIEW
 // ============================================================
 
-// GET /api/interviews/:id
-export const getInterview = async (interviewId) => {
-  return interviewApi.get(`/interviews/${interviewId}`);
-};
-
 // GET /api/interviews
 export const getInterviews = async () => {
   return interviewApi.get("/interviews");
 };
 
+// GET /api/interviews/:id
+export const getInterview = async (interviewId) => {
+  return interviewApi.get(
+    `/interviews/${interviewId}`
+  );
+};
+
 // POST /api/interviews
 export const createInterview = async (data) => {
-  return interviewApi.post("/interviews", data);
+  return interviewApi.post(
+    "/interviews",
+    data
+  );
 };
+
+// ============================================================
+// INTERVIEW LIFECYCLE
+// ============================================================
 
 // POST /api/interviews/:id/start
 export const startInterview = async (interviewId) => {
-  return interviewApi.post(`/interviews/${interviewId}/start`);
-};
-
-// POST /api/interviews/:id/resume
-export const resumeInterview = async (interviewId) => {
-  return interviewApi.post(`/interviews/${interviewId}/resume`);
+  return interviewApi.post(
+    `/interviews/${interviewId}/start`
+  );
 };
 
 // POST /api/interviews/:id/pause
@@ -151,13 +163,24 @@ export const pauseInterview = async (
 ) => {
   return interviewApi.post(
     `/interviews/${interviewId}/pause`,
-    { reason }
+    {
+      reason,
+    }
+  );
+};
+
+// POST /api/interviews/:id/resume
+export const resumeInterview = async (interviewId) => {
+  return interviewApi.post(
+    `/interviews/${interviewId}/resume`
   );
 };
 
 // POST /api/interviews/:id/complete
 export const completeInterview = async (interviewId) => {
-  return interviewApi.post(`/interviews/${interviewId}/complete`);
+  return interviewApi.post(
+    `/interviews/${interviewId}/complete`
+  );
 };
 
 // POST /api/interviews/:id/cancel
@@ -167,9 +190,15 @@ export const cancelInterview = async (
 ) => {
   return interviewApi.post(
     `/interviews/${interviewId}/cancel`,
-    { exitReason }
+    {
+      exitReason,
+    }
   );
 };
+
+// ============================================================
+// INTERVIEW PROGRESS / SCORE / REPORT
+// ============================================================
 
 // GET /api/interviews/:id/progress
 export const getInterviewProgress = async (interviewId) => {
@@ -217,11 +246,6 @@ export const getCurrentQuestion = async (interviewId) => {
   );
 };
 
-// Compatibility alias
-export const getActiveQuestion = async (interviewId) => {
-  return getCurrentQuestion(interviewId);
-};
-
 // GET /api/interviews/:id/next-question
 export const getNextQuestion = async (interviewId) => {
   return interviewApi.get(
@@ -233,20 +257,6 @@ export const getNextQuestion = async (interviewId) => {
 export const getPreviousQuestion = async (interviewId) => {
   return interviewApi.get(
     `/interviews/${interviewId}/previous-question`
-  );
-};
-
-// Legacy endpoint
-export const getNextQuestionLegacy = async (interviewId) => {
-  return interviewApi.get(
-    `/interviews/${interviewId}/questions/next`
-  );
-};
-
-// Legacy endpoint
-export const getPreviousQuestionLegacy = async (interviewId) => {
-  return interviewApi.get(
-    `/interviews/${interviewId}/questions/previous`
   );
 };
 
@@ -271,15 +281,12 @@ export const selectQuestion = async (
 };
 
 // POST /api/interviews/:id/question
-export const generateInterviewQuestion = async (interviewId) => {
+export const generateInterviewQuestion = async (
+  interviewId
+) => {
   return interviewApi.post(
     `/interviews/${interviewId}/question`
   );
-};
-
-// Compatibility alias
-export const generateNextQuestion = async (interviewId) => {
-  return generateInterviewQuestion(interviewId);
 };
 
 // ============================================================
@@ -292,20 +299,39 @@ export const submitAnswer = async (
   questionId,
   data
 ) => {
-  let payload;
-
-  if (typeof data === "string") {
-    payload = {
-      answerType: "text",
-      answerText: data,
-    };
-  } else {
-    payload = {
-      ...(data || {}),
-    };
-  }
+  const payload =
+    typeof data === "string"
+      ? {
+          answerType: "text",
+          answerText: data,
+        }
+      : {
+          ...(data || {}),
+        };
 
   return interviewApi.post(
+    `/interviews/${interviewId}/questions/${questionId}/answer`,
+    payload
+  );
+};
+
+// PUT /api/interviews/:id/questions/:questionId/answer
+export const updateAnswer = async (
+  interviewId,
+  questionId,
+  data
+) => {
+  const payload =
+    typeof data === "string"
+      ? {
+          answerType: "text",
+          answerText: data,
+        }
+      : {
+          ...(data || {}),
+        };
+
+  return interviewApi.put(
     `/interviews/${interviewId}/questions/${questionId}/answer`,
     payload
   );
@@ -317,59 +343,18 @@ export const resubmitAnswer = async (
   questionId,
   data
 ) => {
-  let payload;
-
-  if (typeof data === "string") {
-    payload = {
-      answerType: "text",
-      answerText: data,
-    };
-  } else {
-    payload = {
-      ...(data || {}),
-    };
-  }
+  const payload =
+    typeof data === "string"
+      ? {
+          answerType: "text",
+          answerText: data,
+        }
+      : {
+          ...(data || {}),
+        };
 
   return interviewApi.post(
     `/interviews/${interviewId}/questions/${questionId}/resubmit`,
-    payload
-  );
-};
-
-// Compatibility alias
-export const changeAnswer = async (
-  interviewId,
-  questionId,
-  data
-) => {
-  return resubmitAnswer(
-    interviewId,
-    questionId,
-    data
-  );
-};
-
-// PUT /api/interviews/:id/questions/:questionId/answer
-export const updateAnswer = async (
-  interviewId,
-  questionId,
-  data
-) => {
-  let payload;
-
-  if (typeof data === "string") {
-    payload = {
-      answerType: "text",
-      answerText: data,
-    };
-  } else {
-    payload = {
-      ...(data || {}),
-    };
-  }
-
-  return interviewApi.put(
-    `/interviews/${interviewId}/questions/${questionId}/answer`,
     payload
   );
 };
@@ -391,6 +376,10 @@ export const getInterviewAnswers = async (interviewId) => {
   );
 };
 
+// ============================================================
+// CODING
+// ============================================================
+
 // POST /api/interviews/:id/questions/:questionId/run
 export const runCode = async (
   interviewId,
@@ -402,6 +391,10 @@ export const runCode = async (
     runData
   );
 };
+
+// ============================================================
+// SKIP QUESTION
+// ============================================================
 
 // POST /api/interviews/:id/questions/:questionId/skip
 export const skipQuestion = async (
@@ -423,24 +416,25 @@ export const answerSkippedQuestion = async (
   questionId,
   data
 ) => {
-  let payload;
-
-  if (typeof data === "string") {
-    payload = {
-      answerType: "text",
-      answerText: data,
-    };
-  } else {
-    payload = {
-      ...(data || {}),
-    };
-  }
+  const payload =
+    typeof data === "string"
+      ? {
+          answerType: "text",
+          answerText: data,
+        }
+      : {
+          ...(data || {}),
+        };
 
   return interviewApi.post(
     `/interviews/${interviewId}/questions/${questionId}/answer-skipped`,
     payload
   );
 };
+
+// ============================================================
+// QUESTION STATUS
+// ============================================================
 
 // GET /api/interviews/:id/question-statuses
 export const getInterviewQuestionStatuses = async (
@@ -449,11 +443,6 @@ export const getInterviewQuestionStatuses = async (
   return interviewApi.get(
     `/interviews/${interviewId}/question-statuses`
   );
-};
-
-// Compatibility alias
-export const getQuestionStatuses = async (interviewId) => {
-  return getInterviewQuestionStatuses(interviewId);
 };
 
 // ============================================================
@@ -470,63 +459,25 @@ export const evaluateAnswer = async (
   );
 };
 
-// ============================================================
-// RE-EVALUATE SINGLE ANSWER
-// ============================================================
-
 // POST /api/interviews/:id/questions/:questionId/re-evaluate
-//
-// Supported payload:
-//
-// Text:
-// {
-//   answerType: "text",
-//   answerText: "new answer"
-// }
-//
-// Coding:
-// {
-//   answerType: "coding",
-//   code: "new code",
-//   language: "javascript"
-// }
-//
-// Empty data:
-// Re-evaluates the latest stored answer.
 export const reEvaluateAnswer = async (
   interviewId,
   questionId,
   data = {}
 ) => {
-  let payload;
-
-  if (typeof data === "string") {
-    payload = {
-      answerType: "text",
-      answerText: data,
-    };
-  } else {
-    payload = {
-      ...(data || {}),
-    };
-  }
+  const payload =
+    typeof data === "string"
+      ? {
+          answerType: "text",
+          answerText: data,
+        }
+      : {
+          ...(data || {}),
+        };
 
   return interviewApi.post(
     `/interviews/${interviewId}/questions/${questionId}/re-evaluate`,
     payload
-  );
-};
-
-// Compatibility alias
-export const reEvaluateQuestion = async (
-  interviewId,
-  questionId,
-  data = {}
-) => {
-  return reEvaluateAnswer(
-    interviewId,
-    questionId,
-    data
   );
 };
 
@@ -540,26 +491,19 @@ export const getEvaluation = async (
   );
 };
 
-// Compatibility alias
-export const getQuestionEvaluation = async (
-  interviewId,
-  questionId
-) => {
-  return getEvaluation(
-    interviewId,
-    questionId
-  );
-};
-
 // GET /api/interviews/:id/evaluations
-export const getInterviewEvaluations = async (interviewId) => {
+export const getInterviewEvaluations = async (
+  interviewId
+) => {
   return interviewApi.get(
     `/interviews/${interviewId}/evaluations`
   );
 };
 
 // POST /api/interviews/:id/re-evaluate
-export const reEvaluateInterview = async (interviewId) => {
+export const reEvaluateInterview = async (
+  interviewId
+) => {
   return interviewApi.post(
     `/interviews/${interviewId}/re-evaluate`
   );

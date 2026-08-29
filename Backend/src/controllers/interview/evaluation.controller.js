@@ -1,15 +1,41 @@
+
 const evaluationService = require("../../services/interview/evaluation.service");
 
 // ============================================================
-// HELPER
+// HELPERS
 // ============================================================
 
 const getUserId = (req) => {
-  if (!req?.user?.id) {
+  const userId = req?.user?.id;
+
+  if (!userId) {
     throw new Error("Authenticated user not found");
   }
 
-  return req.user.id;
+  return userId;
+};
+
+const safeNumber = (value) => {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, number));
+};
+
+const average = (values) => {
+  if (!Array.isArray(values) || values.length === 0) {
+    return 0;
+  }
+
+  const total = values.reduce(
+    (sum, value) => sum + safeNumber(value),
+    0
+  );
+
+  return Math.round((total / values.length) * 100) / 100;
 };
 
 // ============================================================
@@ -19,26 +45,16 @@ const getUserId = (req) => {
 const getErrorStatus = (error) => {
   const message = error?.message || "";
 
-  if (
-    message === "Interview not found" ||
-    message === "Question not found" ||
-    message === "Answer not found" ||
-    message === "Evaluation not found" ||
-    message === "Original evaluation must exist before re-evaluation"
-  ) {
-    return 404;
-  }
+  const notFoundMessages = [
+    "Interview not found",
+    "Question not found",
+    "Answer not found",
+    "Evaluation not found",
+    "Original evaluation must exist before re-evaluation",
+  ];
 
-  if (
-    message.startsWith("Invalid ") ||
-    message.startsWith("Answer") ||
-    message.startsWith("Question") ||
-    message.startsWith("Interview") ||
-    message.startsWith("Cannot") ||
-    message.startsWith("Only ") ||
-    message.startsWith("No ")
-  ) {
-    return 400;
+  if (notFoundMessages.includes(message)) {
+    return 404;
   }
 
   return 400;
@@ -56,16 +72,14 @@ const evaluateAnswer = async (req, res) => {
     const result = await evaluationService.evaluateAnswer(
       getUserId(req),
       interviewId,
-      questionId,
+      questionId
     );
 
     return res.status(200).json({
       success: true,
-
       message: result?.alreadyEvaluated
         ? "Answer was already evaluated"
         : "Answer evaluated successfully",
-
       data: result,
     });
   } catch (error) {
@@ -73,8 +87,8 @@ const evaluateAnswer = async (req, res) => {
 
     return res.status(getErrorStatus(error)).json({
       success: false,
-
-      message: error?.message || "Failed to evaluate answer",
+      message:
+        error?.message || "Failed to evaluate answer",
     });
   }
 };
@@ -82,24 +96,6 @@ const evaluateAnswer = async (req, res) => {
 // ============================================================
 // RE-EVALUATE ONE ANSWER
 // POST /api/interviews/:id/questions/:questionId/re-evaluate
-//
-// Optional body:
-//
-// Text:
-// {
-//   "answerType": "text",
-//   "answerText": "new answer"
-// }
-//
-// Coding:
-// {
-//   "answerType": "coding",
-//   "code": "new code",
-//   "language": "javascript"
-// }
-//
-// Empty body:
-// Re-evaluates the currently stored answer.
 // ============================================================
 
 const reEvaluateAnswer = async (req, res) => {
@@ -110,28 +106,36 @@ const reEvaluateAnswer = async (req, res) => {
 
     const payload = {
       answerType:
-        typeof body.answerType === "string" ? body.answerType : undefined,
+        typeof body.answerType === "string"
+          ? body.answerType
+          : undefined,
 
       answerText:
-        typeof body.answerText === "string" ? body.answerText : undefined,
+        typeof body.answerText === "string"
+          ? body.answerText
+          : undefined,
 
-      code: typeof body.code === "string" ? body.code : undefined,
+      code:
+        typeof body.code === "string"
+          ? body.code
+          : undefined,
 
-      language: typeof body.language === "string" ? body.language : undefined,
+      language:
+        typeof body.language === "string"
+          ? body.language
+          : undefined,
     };
 
     const result = await evaluationService.reEvaluateAnswer(
       getUserId(req),
       interviewId,
       questionId,
-      payload,
+      payload
     );
 
     return res.status(200).json({
       success: true,
-
       message: "Answer re-evaluated successfully",
-
       data: result,
     });
   } catch (error) {
@@ -139,8 +143,8 @@ const reEvaluateAnswer = async (req, res) => {
 
     return res.status(getErrorStatus(error)).json({
       success: false,
-
-      message: error?.message || "Failed to re-evaluate answer",
+      message:
+        error?.message || "Failed to re-evaluate answer",
     });
   }
 };
@@ -154,10 +158,11 @@ const reEvaluateInterview = async (req, res) => {
   try {
     const { id: interviewId } = req.params;
 
-    const result = await evaluationService.reEvaluateInterview(
-      getUserId(req),
-      interviewId,
-    );
+    const result =
+      await evaluationService.reEvaluateInterview(
+        getUserId(req),
+        interviewId
+      );
 
     return res.status(200).json({
       success: true,
@@ -174,8 +179,9 @@ const reEvaluateInterview = async (req, res) => {
 
     return res.status(getErrorStatus(error)).json({
       success: false,
-
-      message: error?.message || "Failed to re-evaluate interview",
+      message:
+        error?.message ||
+        "Failed to re-evaluate interview",
     });
   }
 };
@@ -192,7 +198,7 @@ const getEvaluation = async (req, res) => {
     const result = await evaluationService.getEvaluation(
       getUserId(req),
       interviewId,
-      questionId,
+      questionId
     );
 
     return res.status(200).json({
@@ -204,8 +210,8 @@ const getEvaluation = async (req, res) => {
 
     return res.status(getErrorStatus(error)).json({
       success: false,
-
-      message: error?.message || "Failed to fetch evaluation",
+      message:
+        error?.message || "Failed to fetch evaluation",
     });
   }
 };
@@ -219,22 +225,26 @@ const getInterviewEvaluations = async (req, res) => {
   try {
     const { id: interviewId } = req.params;
 
-    const result = await evaluationService.getInterviewEvaluations(
-      getUserId(req),
-      interviewId,
-    );
+    const result =
+      await evaluationService.getInterviewEvaluations(
+        getUserId(req),
+        interviewId
+      );
 
     return res.status(200).json({
       success: true,
       data: result,
     });
   } catch (error) {
-    console.error("Get interview evaluations error:", error);
+    console.error(
+      "Get interview evaluations error:",
+      error
+    );
 
     return res.status(getErrorStatus(error)).json({
       success: false,
-
-      message: error?.message || "Failed to fetch evaluations",
+      message:
+        error?.message || "Failed to fetch evaluations",
     });
   }
 };
@@ -248,31 +258,31 @@ const getInterviewScore = async (req, res) => {
   try {
     const { id: interviewId } = req.params;
 
-    const evaluations = await evaluationService.getInterviewEvaluations(
-      getUserId(req),
-      interviewId,
-    );
+    const evaluations =
+      await evaluationService.getInterviewEvaluations(
+        getUserId(req),
+        interviewId
+      );
 
-    const currentEvaluations = Array.isArray(evaluations?.current)
+    const currentEvaluations = Array.isArray(
+      evaluations?.current
+    )
       ? evaluations.current
       : [];
 
-    if (!currentEvaluations.length) {
+    // --------------------------------------------------------
+    // NO EVALUATIONS
+    // --------------------------------------------------------
+
+    if (currentEvaluations.length === 0) {
       return res.status(200).json({
         success: true,
 
         data: {
           interviewId,
-
           overallScore: 0,
-
           totalEvaluations: 0,
-
           evaluatedQuestions: 0,
-
-          categoryScores: {},
-
-          technologyScores: {},
 
           dimensions: {
             correctness: 0,
@@ -281,30 +291,17 @@ const getInterviewScore = async (req, res) => {
             problemSolving: 0,
           },
 
+          categoryScores: {},
+          technologyScores: {},
+
           message: "No evaluated questions found",
         },
       });
     }
 
-    const safeNumber = (value) => {
-      const number = Number(value);
-
-      if (!Number.isFinite(number)) {
-        return 0;
-      }
-
-      return Math.max(0, Math.min(100, number));
-    };
-
-    const average = (values) => {
-      if (!Array.isArray(values) || values.length === 0) {
-        return 0;
-      }
-
-      const total = values.reduce((sum, value) => sum + safeNumber(value), 0);
-
-      return Math.round((total / values.length) * 100) / 100;
-    };
+    // --------------------------------------------------------
+    // SCORE COLLECTIONS
+    // --------------------------------------------------------
 
     const overallScores = [];
     const correctnessScores = [];
@@ -315,26 +312,40 @@ const getInterviewScore = async (req, res) => {
     const categories = {};
     const technologies = {};
 
+    // --------------------------------------------------------
+    // PROCESS EVALUATIONS
+    // --------------------------------------------------------
+
     for (const evaluation of currentEvaluations) {
-      const overallScore = safeNumber(evaluation?.overallScore);
+      const overallScore = safeNumber(
+        evaluation?.overallScore
+      );
 
-      const correctnessScore = safeNumber(evaluation?.correctnessScore);
+      const correctnessScore = safeNumber(
+        evaluation?.correctnessScore
+      );
 
-      const technicalScore = safeNumber(evaluation?.technicalScore);
+      const technicalScore = safeNumber(
+        evaluation?.technicalScore
+      );
 
-      const communicationScore = safeNumber(evaluation?.communicationScore);
+      const communicationScore = safeNumber(
+        evaluation?.communicationScore
+      );
 
-      const problemSolvingScore = safeNumber(evaluation?.problemSolvingScore);
+      const problemSolvingScore = safeNumber(
+        evaluation?.problemSolvingScore
+      );
 
       overallScores.push(overallScore);
-
       correctnessScores.push(correctnessScore);
-
       technicalScores.push(technicalScore);
-
       communicationScores.push(communicationScore);
-
       problemSolvingScores.push(problemSolvingScore);
+
+      // ------------------------------------------------------
+      // CATEGORY
+      // ------------------------------------------------------
 
       const category =
         evaluation?.category ||
@@ -348,9 +359,15 @@ const getInterviewScore = async (req, res) => {
         };
       }
 
-      categories[category].scores.push(overallScore);
+      categories[category].scores.push(
+        overallScore
+      );
 
       categories[category].questions += 1;
+
+      // ------------------------------------------------------
+      // TECHNOLOGY
+      // ------------------------------------------------------
 
       const technology =
         evaluation?.technology ||
@@ -365,30 +382,48 @@ const getInterviewScore = async (req, res) => {
         };
       }
 
-      technologies[technology].scores.push(overallScore);
+      technologies[technology].scores.push(
+        overallScore
+      );
 
       technologies[technology].questions += 1;
     }
 
+    // --------------------------------------------------------
+    // CATEGORY SCORES
+    // --------------------------------------------------------
+
     const categoryScores = {};
 
-    for (const [category, categoryData] of Object.entries(categories)) {
+    for (const [
+      category,
+      categoryData,
+    ] of Object.entries(categories)) {
       categoryScores[category] = {
         score: average(categoryData.scores),
-
         questions: categoryData.questions,
       };
     }
 
+    // --------------------------------------------------------
+    // TECHNOLOGY SCORES
+    // --------------------------------------------------------
+
     const technologyScores = {};
 
-    for (const [technology, technologyData] of Object.entries(technologies)) {
+    for (const [
+      technology,
+      technologyData,
+    ] of Object.entries(technologies)) {
       technologyScores[technology] = {
         score: average(technologyData.scores),
-
         questions: technologyData.questions,
       };
     }
+
+    // --------------------------------------------------------
+    // FINAL RESULT
+    // --------------------------------------------------------
 
     const result = {
       interviewId,
@@ -401,11 +436,8 @@ const getInterviewScore = async (req, res) => {
 
       dimensions: {
         correctness: average(correctnessScores),
-
         technicalKnowledge: average(technicalScores),
-
         communication: average(communicationScores),
-
         problemSolving: average(problemSolvingScores),
       },
 
@@ -419,12 +451,16 @@ const getInterviewScore = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    console.error("Get interview score error:", error);
+    console.error(
+      "Get interview score error:",
+      error
+    );
 
     return res.status(getErrorStatus(error)).json({
       success: false,
-
-      message: error?.message || "Failed to calculate interview score",
+      message:
+        error?.message ||
+        "Failed to calculate interview score",
     });
   }
 };
@@ -435,14 +471,9 @@ const getInterviewScore = async (req, res) => {
 
 module.exports = {
   evaluateAnswer,
-
   reEvaluateAnswer,
-
   reEvaluateInterview,
-
   getEvaluation,
-
   getInterviewEvaluations,
-
   getInterviewScore,
 };

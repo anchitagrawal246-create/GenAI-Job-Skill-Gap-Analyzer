@@ -1,18 +1,26 @@
 const { Router } = require("express");
 
 // ============================================================
-// INTERVIEW CONTROLLER
+// INTERVIEW CONTROLLER AGGREGATOR
 // ============================================================
 
 const {
+  // ----------------------------------------------------------
+  // INTERVIEW / LIFECYCLE
+  // ----------------------------------------------------------
   createInterview,
   getInterviews,
   getInterview,
   startInterview,
   pauseInterview,
   resumeInterview,
+  completeInterview,
+  cancelInterview,
+  getInterviewProgress,
 
-  // Questions
+  // ----------------------------------------------------------
+  // QUESTIONS
+  // ----------------------------------------------------------
   getInterviewQuestions,
   generateInterviewQuestion,
   getCurrentQuestion,
@@ -21,21 +29,9 @@ const {
   getQuestionByNumber,
   selectQuestion,
 
-  // Interview control
-  completeInterview,
-  cancelInterview,
-  getInterviewProgress,
-
-  // Reports
-  getInterviewReport,
-  generateInterviewReport,
-} = require("../../controllers/interview/interview.controller");
-
-// ============================================================
-// ANSWER CONTROLLER
-// ============================================================
-
-const {
+  // ----------------------------------------------------------
+  // ANSWERS
+  // ----------------------------------------------------------
   submitAnswer,
   resubmitAnswer,
   runCode,
@@ -44,20 +40,23 @@ const {
   getAnswer,
   getInterviewAnswers,
   getInterviewQuestionStatuses,
-} = require("../../controllers/interview/interview.controller");
 
-// ============================================================
-// EVALUATION CONTROLLER
-// ============================================================
-
-const {
+  // ----------------------------------------------------------
+  // EVALUATION
+  // ----------------------------------------------------------
   evaluateAnswer,
   reEvaluateAnswer,
   reEvaluateInterview,
   getEvaluation,
   getInterviewEvaluations,
-  getInterviewScore
-} = require("../../controllers/interview/evaluation.controller");
+  getInterviewScore,
+
+  // ----------------------------------------------------------
+  // REPORTS
+  // ----------------------------------------------------------
+  getInterviewReport,
+  generateInterviewReport,
+} = require("../../controllers/interview/interview.controller");
 
 // ============================================================
 // MIDDLEWARE
@@ -102,162 +101,94 @@ router.get("/", getInterviews);
 // ============================================================
 
 // GET /api/interviews/:id/score
-router.get(
-  "/:id/score",
-  validateObjectId("id"),
-  getInterviewScore
-);
+router.get("/:id/score", validateObjectId("id"), getInterviewScore);
 
 // GET /api/interviews/:id/progress
-router.get(
-  "/:id/progress",
-  validateObjectId("id"),
-  getInterviewProgress
-);
+router.get("/:id/progress", validateObjectId("id"), getInterviewProgress);
 
 // GET /api/interviews/:id/report
-router.get(
-  "/:id/report",
-  validateObjectId("id"),
-  getInterviewReport
-);
+router.get("/:id/report", validateObjectId("id"), getInterviewReport);
 
 // POST /api/interviews/:id/report
-router.post(
-  "/:id/report",
-  validateObjectId("id"),
-  generateInterviewReport
-);
+router.post("/:id/report", validateObjectId("id"), generateInterviewReport);
 
 // GET /api/interviews/:id/evaluations
-router.get(
-  "/:id/evaluations",
-  validateObjectId("id"),
-  getInterviewEvaluations
-);
+router.get("/:id/evaluations", validateObjectId("id"), getInterviewEvaluations);
 
 // POST /api/interviews/:id/re-evaluate
-router.post(
-  "/:id/re-evaluate",
-  validateObjectId("id"),
-  reEvaluateInterview
-);
+router.post("/:id/re-evaluate", validateObjectId("id"), reEvaluateInterview);
 
 // GET /api/interviews/:id/answers
-router.get(
-  "/:id/answers",
-  validateObjectId("id"),
-  getInterviewAnswers
-);
+router.get("/:id/answers", validateObjectId("id"), getInterviewAnswers);
 
 // GET /api/interviews/:id/question-statuses
 router.get(
   "/:id/question-statuses",
   validateObjectId("id"),
-  getInterviewQuestionStatuses
+  getInterviewQuestionStatuses,
 );
 
 // GET /api/interviews/:id/current-question
-router.get(
-  "/:id/current-question",
-  validateObjectId("id"),
-  getCurrentQuestion
-);
+router.get("/:id/current-question", validateObjectId("id"), getCurrentQuestion);
 
 // GET /api/interviews/:id/next-question
-router.get(
-  "/:id/next-question",
-  validateObjectId("id"),
-  getNextQuestion
-);
+router.get("/:id/next-question", validateObjectId("id"), getNextQuestion);
 
 // GET /api/interviews/:id/previous-question
 router.get(
   "/:id/previous-question",
   validateObjectId("id"),
-  getPreviousQuestion
+  getPreviousQuestion,
 );
 
 // GET /api/interviews/:id/questions/next
-router.get(
-  "/:id/questions/next",
-  validateObjectId("id"),
-  getNextQuestion
-);
+router.get("/:id/questions/next", validateObjectId("id"), getNextQuestion);
 
 // GET /api/interviews/:id/questions/previous
 router.get(
   "/:id/questions/previous",
   validateObjectId("id"),
-  getPreviousQuestion
+  getPreviousQuestion,
 );
 
 // POST /api/interviews/:id/start
-router.post(
-  "/:id/start",
-  validateObjectId("id"),
-  startInterview
-);
+router.post("/:id/start", validateObjectId("id"), startInterview);
 
 // POST /api/interviews/:id/pause
-router.post(
-  "/:id/pause",
-  validateObjectId("id"),
-  pauseInterview
-);
+router.post("/:id/pause", validateObjectId("id"), pauseInterview);
 
 // POST /api/interviews/:id/resume
-router.post(
-  "/:id/resume",
-  validateObjectId("id"),
-  resumeInterview
-);
+router.post("/:id/resume", validateObjectId("id"), resumeInterview);
 
 // POST /api/interviews/:id/complete
-router.post(
-  "/:id/complete",
-  validateObjectId("id"),
-  completeInterview
-);
+router.post("/:id/complete", validateObjectId("id"), completeInterview);
 
 // POST /api/interviews/:id/cancel
-router.post(
-  "/:id/cancel",
-  validateObjectId("id"),
-  cancelInterview
-);
+router.post("/:id/cancel", validateObjectId("id"), cancelInterview);
 
 // ============================================================
 // QUESTION ROUTES
 // ============================================================
 
 // GET /api/interviews/:id/questions
-router.get(
-  "/:id/questions",
-  validateObjectId("id"),
-  getInterviewQuestions
-);
+router.get("/:id/questions", validateObjectId("id"), getInterviewQuestions);
 
 // GET /api/interviews/:id/questions/:questionNumber
 router.get(
   "/:id/questions/:questionNumber",
   validateObjectId("id"),
-  getQuestionByNumber
+  getQuestionByNumber,
 );
 
 // POST /api/interviews/:id/questions/:questionNumber/select
 router.post(
   "/:id/questions/:questionNumber/select",
   validateObjectId("id"),
-  selectQuestion
+  selectQuestion,
 );
 
 // POST /api/interviews/:id/question
-router.post(
-  "/:id/question",
-  validateObjectId("id"),
-  generateInterviewQuestion
-);
+router.post("/:id/question", validateObjectId("id"), generateInterviewQuestion);
 
 // ============================================================
 // ANSWER ROUTES
@@ -268,7 +199,7 @@ router.post(
   "/:id/questions/:questionId/answer",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  submitAnswer
+  submitAnswer,
 );
 
 // PUT /api/interviews/:id/questions/:questionId/answer
@@ -276,7 +207,7 @@ router.put(
   "/:id/questions/:questionId/answer",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  resubmitAnswer
+  resubmitAnswer,
 );
 
 // POST /api/interviews/:id/questions/:questionId/resubmit
@@ -284,7 +215,7 @@ router.post(
   "/:id/questions/:questionId/resubmit",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  resubmitAnswer
+  resubmitAnswer,
 );
 
 // POST /api/interviews/:id/questions/:questionId/run
@@ -292,7 +223,7 @@ router.post(
   "/:id/questions/:questionId/run",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  runCode
+  runCode,
 );
 
 // GET /api/interviews/:id/questions/:questionId/answer
@@ -300,7 +231,7 @@ router.get(
   "/:id/questions/:questionId/answer",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  getAnswer
+  getAnswer,
 );
 
 // POST /api/interviews/:id/questions/:questionId/skip
@@ -308,7 +239,7 @@ router.post(
   "/:id/questions/:questionId/skip",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  skipQuestion
+  skipQuestion,
 );
 
 // POST /api/interviews/:id/questions/:questionId/answer-skipped
@@ -316,7 +247,7 @@ router.post(
   "/:id/questions/:questionId/answer-skipped",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  answerSkippedQuestion
+  answerSkippedQuestion,
 );
 
 // ============================================================
@@ -328,7 +259,7 @@ router.post(
   "/:id/questions/:questionId/evaluate",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  evaluateAnswer
+  evaluateAnswer,
 );
 
 // POST /api/interviews/:id/questions/:questionId/re-evaluate
@@ -336,7 +267,7 @@ router.post(
   "/:id/questions/:questionId/re-evaluate",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  reEvaluateAnswer
+  reEvaluateAnswer,
 );
 
 // GET /api/interviews/:id/questions/:questionId/evaluation
@@ -344,22 +275,19 @@ router.get(
   "/:id/questions/:questionId/evaluation",
   validateObjectId("id"),
   validateObjectId("questionId"),
-  getEvaluation
+  getEvaluation,
 );
 
 // ============================================================
 // GET INTERVIEW BY ID
 // ============================================================
-
+//
 // IMPORTANT:
 // Keep this LAST among interview routes.
-// Otherwise /:id can become a debugging trap.
+// Otherwise /:id can interfere with more specific routes.
+//
 
-router.get(
-  "/:id",
-  validateObjectId("id"),
-  getInterview
-);
+router.get("/:id", validateObjectId("id"), getInterview);
 
 // ============================================================
 // EXPORT
