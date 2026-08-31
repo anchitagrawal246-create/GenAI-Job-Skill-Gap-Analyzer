@@ -571,7 +571,8 @@ module.exports = {
   extractGithubUsername,
   normalizeSkillName,
 };
-// ths is githb evidence
+// ths is github evidence
 
 
 
+  
